@@ -1,0 +1,40 @@
+name: api
+on:
+  push:
+    paths: ["apps/api/**", ".github/workflows/api.yml"]
+  pull_request:
+    paths: ["apps/api/**", ".github/workflows/api.yml"]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        db: [sqlite, postgres]
+    services:
+      postgres:
+        image: postgres:16
+        env: {POSTGRES_USER: dcim, POSTGRES_PASSWORD: dcim, POSTGRES_DB: dcim_test}
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U dcim" --health-interval 5s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: apps/api
+    env:
+      DCIM_TEST_DATABASE_URL: ${{ matrix.db == 'postgres' && 'postgresql+psycopg://dcim:dcim@localhost:5432/dcim_test' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - run: pip install --require-hashes -r requirements-dev.txt
+      - run: pip-audit -r requirements.txt --strict
+      - name: Migrations up/down/up + drift check
+        env:
+          DCIM_DATABASE_URL: ${{ matrix.db == 'postgres' && 'postgresql+psycopg://dcim:dcim@localhost:5432/dcim_test' || 'sqlite:///ci.db' }}
+        run: |
+          alembic upgrade head && alembic check && alembic downgrade base && alembic upgrade head
+      - run: python -m pytest -q
+      - name: openapi.json is up to date
+        if: matrix.db == 'sqlite'
+        run: python scripts/export_openapi.py && git diff --exit-code openapi.json

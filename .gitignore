@@ -1,0 +1,32 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+dist/
+
+# Secrets and local env (examples stay tracked)
+.env
+.env.*
+!.env.example
+
+# Local databases and sessions. A fresh clone has neither.
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+sessions/
+
+# Removal exports (item 47f) never belong in the repo; they go in DCIM_EXPORT_DIR
+exports/
+*removed*.json
+*removed*.csv
+*.export.json
+*.export.csv

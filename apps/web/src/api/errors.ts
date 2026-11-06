@@ -1,0 +1,51 @@
+// Friendly copy for structured API error codes ({detail: {code, message, missing?}}),
+// checked against apps/api (devices/service.py, lifecycle.py, connections) at a289079/72fee98.
+// One place to add codes; ApiError.message uses this when a code is known.
+const COPY: Record<string, string> = {
+  profile_required: 'Choose a profile (manufacturer, model and variant) before placing this device in a cabinet.',
+  profile_not_published: "This profile isn't published yet (or was retired). Pick a published profile.",
+  profile_not_usable: "This profile needs review before it can be used for new devices. Existing devices on it are unaffected.",
+  profile_type_mismatch: "The profile doesn't belong to the chosen model. Pick a profile of that model.",
+  profile_in_use: 'Devices use this profile, so it can’t be changed or deleted. Create a new version or retire it instead.',
+  device_has_connections: "This device still has connections. Delete its connections first.",
+  port_in_use: 'That port is already connected. Pick a free port.',
+  self_connection: "A port can't be connected to itself.",
+  cable_label_conflict: 'Another cable already has this label. Use a different label.',
+  image_too_large: 'The image is too large (max 2 MiB and 4096 × 4096 px).',
+  svg_not_allowed: "SVG isn't supported. Export a PNG.",
+  // P1-10 (f2dab41): a concurrent writer took the slot between our check and commit.
+  ru_slot_taken: 'Someone just placed a device in those U slots. Refresh the cabinet and pick a free position.',
+  floor_position_taken: 'Another cabinet was just placed on that floor position. Refresh and pick a free cell.',
+  // Cabinet profiles (docs/API.md "Cabinet profiles", feat/cabinet-profiles 43bbb1e).
+  cabinet_profile_incomplete: 'Not ready to publish.',
+  invalid_status_transition: "That change isn't allowed in this state. Reload and try again.",
+  invalid_dimension: 'Usable sizes and rail depths must fit inside the outer size.',
+  cabinet_profile_retired: 'This profile is retired, so it is read-only. Un-retire it or clone it.',
+  cabinet_profile_in_use: "Can't delete: in use. Retire it instead.",
+  cabinet_profile_name_taken: 'A profile with this manufacturer, model and variant already exists.',
+  version_conflict: 'Changed by someone else since you opened it. Reload to see the latest.',
+}
+/** 409 on editing a flagged device: the code is its needs_review_reason (lifecycle.py _check_flagged_edit). */
+const FLAGGED: Record<string, string> = {
+  placed_without_profile: 'This device was placed without a profile. Choose a profile, unplace it, or decommission it before other edits.',
+  profile_not_published: "This device's profile isn't published. Choose a published profile, unplace it, or decommission it before other edits.",
+}
+
+export interface ErrorDetail { code?: string; message?: string; missing?: string[]; profile_id?: number; issues?: string[]; reason?: string }
+
+export function errorDetail(detail: unknown): ErrorDetail | null {
+  const d = (detail as { detail?: unknown } | undefined)?.detail
+  return d && typeof d === 'object' && !Array.isArray(d) ? (d as ErrorDetail) : null
+}
+
+export function friendlyMessage(d: ErrorDetail, status?: number): string | null {
+  if (!d.code) return null
+  const base = (status === 409 && FLAGGED[d.code]) || COPY[d.code]
+  if (!base) return null
+  if (d.code === 'profile_not_usable') {
+    const issues = d.issues ?? (d.reason ? [d.reason] : [])
+    if (issues.includes('rear_image_missing')) return 'Upload a rear image for this profile first. Existing devices on it are unaffected.'
+    if (issues.includes('orientation_missing')) return 'Set the orientation (Power front / Port front) for this profile first.'
+  }
+  return d.missing?.length ? `${base} Missing: ${d.missing.join(', ')}.` : base
+}

@@ -1,0 +1,9 @@
+# Runtime dependencies (pin with: pip-compile --generate-hashes requirements.in)
+fastapi
+uvicorn
+sqlmodel
+alembic
+pydantic-settings
+argon2-cffi
+psycopg[binary]
+pillow
