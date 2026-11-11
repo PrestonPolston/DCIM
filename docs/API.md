@@ -34,6 +34,7 @@ Base URL in dev: `http://127.0.0.1:8000`. The full schema is in `apps/api/openap
 | `/users` (admin) | **email**, **role**, display_name, temporary_password (omit to generate); PATCH role / is_active; `POST /users/{id}/reset-password`, `/unlock` | |
 | `/audit-events` (admin, GET only) | append-only log: actor, action, entity, before/after, request id, `via` (api, script, migration, csv_import), `retention_class` (standard, or restorable = deletion snapshots, kept ≥ 24 months and excluded from the 13-month purge; `DCIM_RESTORABLE_RETENTION_MONTHS`) | see openapi |
 | `/home/summary` (any signed-in role) | post-login home tiles: counts and capped lists. `my_work` for every role; `admin` only for admins (omitted, not null, for others). See "Home summary" below | |
+| `/home/search` (any signed-in role) | home typeahead: devices (hostname, serial/asset tag, previous host names), cabinets, rows and halls. `q` at least 2 characters; `limit` default 5, max 20 per group. DCREQ is parked. See "Home search" below | |
 
 Each resource has `GET` and `POST` on `/{resource}`, plus `GET`, `PATCH`, and `DELETE` (returns 204) on `/{resource}/{id}`. A parent's ID (for example `site_id`) cannot be changed with PATCH.
 
@@ -232,6 +233,91 @@ Any signed-in role. 401 without a session. One payload for the post-login home t
     },
     "workload": {"key": "workload", "status": "not_available", "message": "Needs jobs/DCREQ logic."}
   }
+}
+```
+
+## Home search: `GET /home/search`
+
+Quick search for the home typeahead. Any signed-in role may call it; unauthenticated requests return **401**. There is no admin-only section or field — technicians and read-only users get the same shape as admins.
+
+Query string:
+
+- `q` (required): case-insensitive substring, at least 2 characters after trimming, max 100. A missing, blank, or shorter `q` returns **422**. LIKE wildcards in `q` (`%`, `_`, and `\`) are treated as literals.
+- `limit` (optional): maximum hits **per group**, default 5, minimum 1, maximum 20. Values outside that range return **422**.
+
+Matching:
+
+- **devices**: current `host_name` (returned as `hostname` / `label`), `serial_number` (vendor serial or asset tag, returned as `serial`), and previous host names in name history. Soft-deleted devices are omitted. `rack_id`, `rack_name` and `position_u` are null when the device is unplaced.
+- **cabinets**: live rack name. Each hit includes the parent row and hall (`row_id` / `row_name`, `hall_id` / `hall_name`).
+- **rows**: row name, plus `site_id` / `site_name`.
+- **halls**: hall name, plus `site_id` / `site_name`.
+
+DCREQ search is parked as `{key, status: "not_available", message}` with no numeric data. All four groups are always present, even when empty. `count` is the full number of matches in that group; `truncated` is true when `count` is greater than the number of `items` returned. `generated_at` is a UTC instant with a trailing Z.
+
+Example (`GET /home/search?q=r01&limit=5`):
+
+```json
+{
+  "query": "r01",
+  "generated_at": "2026-11-11T14:39:00Z",
+  "groups": [
+    {
+      "key": "devices",
+      "count": 12,
+      "truncated": true,
+      "items": [
+        {
+          "id": 12,
+          "label": "r01c03-srv-09",
+          "hostname": "r01c03-srv-09",
+          "serial": "SN123",
+          "status": "install",
+          "rack_id": 4,
+          "rack_name": "C03",
+          "position_u": 20
+        }
+      ]
+    },
+    {
+      "key": "cabinets",
+      "count": 1,
+      "truncated": false,
+      "items": [
+        {
+          "id": 4,
+          "label": "C03",
+          "name": "C03",
+          "row_id": 2,
+          "row_name": "Row 1",
+          "hall_id": 1,
+          "hall_name": "Hall A"
+        }
+      ]
+    },
+    {
+      "key": "rows",
+      "count": 1,
+      "truncated": false,
+      "items": [
+        {
+          "id": 2,
+          "label": "Row 1",
+          "name": "Row 1",
+          "site_id": 1,
+          "site_name": "Default"
+        }
+      ]
+    },
+    {
+      "key": "halls",
+      "count": 0,
+      "truncated": false,
+      "items": []
+    }
+  ],
+  "parked": [
+    {"key": "dcreqs", "status": "not_available", "message": "DCREQ search is not available yet."}
+  ]
 }
 ```
 
