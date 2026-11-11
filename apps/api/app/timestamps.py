@@ -34,8 +34,19 @@ class SoftDeleteMixin(SQLModel):
     deleted_by: str | None = None
 
 
-# SQLite hands back naive datetimes; treat them as UTC
+# SQLite hands back naive datetimes (treat as UTC). Postgres may return them in
+# the session time zone; always convert to UTC so responses are consistent.
 def as_utc(value: datetime | None) -> datetime | None:
-    if value is not None and value.tzinfo is None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
-    return value
+    return value.astimezone(UTC)
+
+
+def iso_z(value: datetime | None) -> str | None:
+    """ISO 8601 UTC with a trailing Z, e.g. 2026-11-11T14:00:00Z."""
+    value = as_utc(value)
+    if value is None:
+        return None
+    return value.isoformat().replace("+00:00", "Z")

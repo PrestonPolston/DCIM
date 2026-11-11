@@ -1,6 +1,7 @@
 from app.modules.device_types.schemas import DeviceProfile
 from app.enums import AssetTypeLiteral
 """Flat profile catalog for the palette and reports: GET /profiles (one joined query, no N+1)."""
+from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -13,6 +14,7 @@ from app.modules.auth.deps import ADMIN, TECH, get_current_user
 from app.modules.device_types.models import DeviceTypeProfileRow as P, DeviceTypeRow as T
 from app.modules.devices.models import DeviceRow
 from app.pagination import Pagination, contains
+from app.timestamps import as_utc
 
 router = APIRouter(dependencies=[Depends(get_current_user)], tags=["device-types"])
 
@@ -50,6 +52,9 @@ class ProfileListItem(BaseModel):
     weight_kg: float | None = None
     orientation: str | None = None
     device_count: int
+    published_at: datetime | None = None
+    retired_at: datetime | None = None
+    updated_at: datetime | None = None
     front_image: ProfileImageRef | None = None
     rear_image: ProfileImageRef | None = None
     front_image_url: str | None = None  # DEPRECATED alias of front_image.url (kept until the web confirms)
@@ -120,6 +125,7 @@ def list_profiles(
         power_type=p.power_type, airflow=p.airflow, asset_type=t.asset_type, effective_asset_type=t.asset_type,
         color_hex=p.color_hex, is_default=p.is_default, status=st, device_count=cnt, readiness=ready[p.id], usable=use[p.id][0], usable_issue=(use[p.id][1] or [None])[0],
         usable_issues=use[p.id][1], mounting=p.mounting, weight_kg=p.weight_kg, orientation=p.orientation,
+        published_at=as_utc(p.published_at), retired_at=as_utc(p.retired_at), updated_at=as_utc(p.updated_at),
     ) for p, t, cnt, st in rows]
 
 
