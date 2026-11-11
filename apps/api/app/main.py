@@ -8,6 +8,7 @@ import app.models  # noqa: F401  (registers tables)
 import app.modules.audit.listeners  # noqa: F401  (location/device-type audit events)
 from app.modules.audit.router import router as audit_router
 from app.modules.cabinet_profiles.router import images_router as cabinet_images_router, router as cabinet_profiles_router
+from app.modules.home.router import router as home_router
 from app.modules.auth.router import router as auth_router
 from app.modules.device_types.catalog import router as catalog_router
 from app.modules.images.router import router as images_router
@@ -63,7 +64,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     for router in (auth_router, users_router, audit_router, locations_router,
                    device_types_router, profiles_router, devices_router, directory_router, connections_router, catalog_router, images_router, rack_devices_router,
-                   cabinet_profiles_router, cabinet_images_router):
+                   cabinet_profiles_router, cabinet_images_router, home_router):
         app.include_router(router)
 
     @app.get("/")

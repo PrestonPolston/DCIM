@@ -6867,6 +6867,28 @@
         }
       }
     },
+    "/home/summary": {
+      "get": {
+        "tags": [
+          "home"
+        ],
+        "summary": "Get Home Summary",
+        "description": "Counts and capped lists for the post-login home tiles this role can see.",
+        "operationId": "get_home_summary_home_summary_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HomeSummary"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/": {
       "get": {
         "summary": "Root",
@@ -6918,6 +6940,26 @@
   },
   "components": {
     "schemas": {
+      "AdminSection": {
+        "properties": {
+          "profile_health": {
+            "$ref": "#/components/schemas/ProfileHealthTile"
+          },
+          "device_issues": {
+            "$ref": "#/components/schemas/DeviceIssuesTile"
+          },
+          "workload": {
+            "$ref": "#/components/schemas/ParkedTile"
+          }
+        },
+        "type": "object",
+        "required": [
+          "profile_health",
+          "device_issues",
+          "workload"
+        ],
+        "title": "AdminSection"
+      },
       "AdoptIn": {
         "properties": {
           "device_ids": {
@@ -9438,6 +9480,36 @@
         ],
         "title": "DeviceCreate"
       },
+      "DeviceIssuesTile": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "const": "device_issues",
+            "title": "Key",
+            "default": "device_issues"
+          },
+          "no_position": {
+            "$ref": "#/components/schemas/UnpositionedList"
+          },
+          "needs_power_assignment": {
+            "$ref": "#/components/schemas/ParkedTile"
+          },
+          "port_conflicts": {
+            "$ref": "#/components/schemas/ParkedTile"
+          },
+          "open_power_mismatches": {
+            "$ref": "#/components/schemas/ParkedTile"
+          }
+        },
+        "type": "object",
+        "required": [
+          "no_position",
+          "needs_power_assignment",
+          "port_conflicts",
+          "open_power_mismatches"
+        ],
+        "title": "DeviceIssuesTile"
+      },
       "DeviceProfile": {
         "properties": {
           "color_hex": {
@@ -11666,6 +11738,35 @@
         "type": "object",
         "title": "HallUpdate"
       },
+      "HomeSummary": {
+        "properties": {
+          "generated_at": {
+            "type": "string",
+            "title": "Generated At",
+            "description": "UTC instant this payload was built, ISO 8601 with Z"
+          },
+          "my_work": {
+            "$ref": "#/components/schemas/MyWork"
+          },
+          "admin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdminSection"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Present for admins only; omitted for other roles"
+          }
+        },
+        "type": "object",
+        "required": [
+          "generated_at",
+          "my_work"
+        ],
+        "title": "HomeSummary"
+      },
       "ImageMeta": {
         "properties": {
           "face": {
@@ -11889,6 +11990,26 @@
         ],
         "title": "Me"
       },
+      "MyWork": {
+        "properties": {
+          "jobs": {
+            "$ref": "#/components/schemas/ParkedTile"
+          },
+          "dcreqs": {
+            "$ref": "#/components/schemas/ParkedTile"
+          },
+          "held_imports": {
+            "$ref": "#/components/schemas/ParkedTile"
+          }
+        },
+        "type": "object",
+        "required": [
+          "jobs",
+          "dcreqs",
+          "held_imports"
+        ],
+        "title": "MyWork"
+      },
       "NameHistory": {
         "properties": {
           "id": {
@@ -11944,6 +12065,107 @@
           "changed_at"
         ],
         "title": "NameHistory"
+      },
+      "NeedsReviewItem": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "usable_issue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Usable Issue"
+          },
+          "usable_issues": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Usable Issues"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "usable_issue",
+          "usable_issues"
+        ],
+        "title": "NeedsReviewItem"
+      },
+      "NeedsReviewList": {
+        "properties": {
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/NeedsReviewItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "by_issue": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "By Issue"
+          },
+          "filter": {
+            "type": "string",
+            "title": "Filter",
+            "default": "status=published&usable=false"
+          }
+        },
+        "type": "object",
+        "required": [
+          "count",
+          "truncated",
+          "items",
+          "by_issue"
+        ],
+        "title": "NeedsReviewList"
+      },
+      "ParkedTile": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "status": {
+            "type": "string",
+            "const": "not_available",
+            "title": "Status",
+            "default": "not_available"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "message"
+        ],
+        "title": "ParkedTile"
       },
       "Port": {
         "properties": {
@@ -12367,6 +12589,40 @@
         ],
         "title": "PowerSpec"
       },
+      "ProfileHealthTile": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "const": "profile_health",
+            "title": "Key",
+            "default": "profile_health"
+          },
+          "by_status": {
+            "$ref": "#/components/schemas/StatusCounts"
+          },
+          "needs_review": {
+            "$ref": "#/components/schemas/NeedsReviewList"
+          },
+          "stale_drafts": {
+            "$ref": "#/components/schemas/StaleDraftsList"
+          },
+          "recently_retired": {
+            "$ref": "#/components/schemas/RecentlyRetiredList"
+          },
+          "recently_changed": {
+            "$ref": "#/components/schemas/RecentlyChangedList"
+          }
+        },
+        "type": "object",
+        "required": [
+          "by_status",
+          "needs_review",
+          "stale_drafts",
+          "recently_retired",
+          "recently_changed"
+        ],
+        "title": "ProfileHealthTile"
+      },
       "ProfileImageRef": {
         "properties": {
           "url": {
@@ -12628,6 +12884,42 @@
           "device_count": {
             "type": "integer",
             "title": "Device Count"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "retired_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retired At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
           },
           "front_image": {
             "anyOf": [
@@ -13735,6 +14027,143 @@
         ],
         "title": "Readiness"
       },
+      "RecentlyChangedItem": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "published",
+              "retired"
+            ],
+            "title": "Status"
+          },
+          "updated_at": {
+            "type": "string",
+            "title": "Updated At"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "retired_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retired At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "status",
+          "updated_at",
+          "published_at",
+          "retired_at"
+        ],
+        "title": "RecentlyChangedItem"
+      },
+      "RecentlyChangedList": {
+        "properties": {
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RecentlyChangedItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "count",
+          "truncated",
+          "items"
+        ],
+        "title": "RecentlyChangedList"
+      },
+      "RecentlyRetiredItem": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "retired_at": {
+            "type": "string",
+            "title": "Retired At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "retired_at"
+        ],
+        "title": "RecentlyRetiredItem"
+      },
+      "RecentlyRetiredList": {
+        "properties": {
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RecentlyRetiredItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "filter": {
+            "type": "string",
+            "title": "Filter",
+            "default": "status=retired"
+          }
+        },
+        "type": "object",
+        "required": [
+          "count",
+          "truncated",
+          "items"
+        ],
+        "title": "RecentlyRetiredList"
+      },
       "Reference": {
         "properties": {
           "kind": {
@@ -14241,6 +14670,140 @@
         "additionalProperties": false,
         "type": "object",
         "title": "SiteUpdate"
+      },
+      "StaleDraftItem": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "updated_at": {
+            "type": "string",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "updated_at"
+        ],
+        "title": "StaleDraftItem"
+      },
+      "StaleDraftsList": {
+        "properties": {
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/StaleDraftItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "filter": {
+            "type": "string",
+            "title": "Filter",
+            "default": "status=draft"
+          }
+        },
+        "type": "object",
+        "required": [
+          "count",
+          "truncated",
+          "items"
+        ],
+        "title": "StaleDraftsList"
+      },
+      "StatusCounts": {
+        "properties": {
+          "draft": {
+            "type": "integer",
+            "title": "Draft",
+            "default": 0
+          },
+          "published": {
+            "type": "integer",
+            "title": "Published",
+            "default": 0
+          },
+          "retired": {
+            "type": "integer",
+            "title": "Retired",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "StatusCounts"
+      },
+      "UnpositionedDeviceItem": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "hostname": {
+            "type": "string",
+            "title": "Hostname"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "updated_at": {
+            "type": "string",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "hostname",
+          "status",
+          "updated_at"
+        ],
+        "title": "UnpositionedDeviceItem"
+      },
+      "UnpositionedList": {
+        "properties": {
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/UnpositionedDeviceItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "filter": {
+            "type": "string",
+            "title": "Filter",
+            "default": "status=install&status=active&unplaced=true"
+          }
+        },
+        "type": "object",
+        "required": [
+          "count",
+          "truncated",
+          "items"
+        ],
+        "title": "UnpositionedList"
       },
       "User": {
         "properties": {
