@@ -366,7 +366,7 @@ export async function composeSearch(q: string, limit = SEARCH_DEFAULT_LIMIT): Pr
       {
         key: 'devices', count: devices.total, truncated: devices.total > cap,
         items: devices.items.slice(0, cap).map((d) => ({
-          id: d.id, label: d.host_name, hostname: d.host_name, serial: d.serial_number,
+          id: d.id, label: d.host_name, hostname: d.host_name, serial: d.serial_number ?? null,
           status: d.status, rack_id: d.rack_id ?? null, rack_name: null, position_u: d.position_u ?? null,
         })),
       },

@@ -230,4 +230,27 @@ describe('tile loading, empty and error states (presentational)', () => {
     renderWithProviders(<DeviceIssuesTile data={{ ...fixtureDeviceIssues(), no_position: { count: 0, truncated: false, items: [], filter: 'status=install&status=active&unplaced=true' } }} canPlace />, '/')
     expect(screen.getByText('All live devices have a position.')).toBeInTheDocument()
   })
+
+  it('truncates a long no-position hostname with a hover title', () => {
+    const hostname = 'very-long-unplaced-device-hostname-that-should-not-overflow-the-device-issues-tile'
+    const issues = fixtureDeviceIssues()
+    renderWithProviders(
+      <DeviceIssuesTile
+        data={{
+          ...issues,
+          no_position: {
+            ...issues.no_position,
+            count: 1,
+            truncated: false,
+            items: [{ id: 99, hostname, status: 'install', updated_at: '2026-11-11T14:00:00Z' }],
+          },
+        }}
+        canPlace
+      />,
+      '/',
+    )
+    const host = screen.getByText(hostname)
+    expect(host).toHaveClass('home-host')
+    expect(host).toHaveAttribute('title', hostname)
+  })
 })

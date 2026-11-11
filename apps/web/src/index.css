@@ -647,7 +647,7 @@ ol.cp-history { padding-left: 0; gap: var(--space-2); }
 @media (min-width: 900px) { .home-grid { grid-template-columns: 1fr 1fr; } }
 .home-tile {
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
-  padding: 10px 12px;
+  padding: 10px 12px; min-width: 0;
 }
 .home-tile-head { display: flex; justify-content: space-between; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); flex-wrap: wrap; }
 .home-tile h2 { font-size: var(--fs-sm); display: flex; align-items: baseline; gap: var(--space-2); }
@@ -662,9 +662,17 @@ ol.cp-history { padding-left: 0; gap: var(--space-2); }
 .home-row {
   display: flex; justify-content: space-between; gap: var(--space-2); padding: 6px 0;
   border-bottom: 1px solid var(--surface-2); font-size: var(--fs-sm); align-items: baseline;
+  min-width: 0;
 }
 .home-row:last-child { border-bottom: 0; }
-.home-lk { color: var(--primary); font-size: var(--fs-xs); text-decoration: underline; }
+.home-row-main {
+  display: flex; align-items: baseline; min-width: 0; flex: 1 1 auto; overflow: hidden;
+}
+.home-host {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto;
+}
+.home-row-meta { flex: 0 0 auto; white-space: nowrap; }
+.home-lk { color: var(--primary); font-size: var(--fs-xs); text-decoration: underline; flex-shrink: 0; }
 button.link, .link {
   background: none; border: 0; color: var(--primary); font: inherit; font-size: inherit;
   padding: 0; min-width: 0; min-height: 0; cursor: pointer; text-decoration: underline;

@@ -140,7 +140,10 @@ export function DeviceIssuesTile({
             {emptyPos && <p className="hint">{emptyPos}</p>}
             {n > 0 && data.no_position.items.map((d) => (
               <div className="home-row" key={d.id}>
-                <span><span className="mono">{d.hostname}</span> · {statusLabel(d.status)} · unplaced</span>
+                <span className="home-row-main">
+                  <span className="mono home-host" title={d.hostname}>{d.hostname}</span>
+                  <span className="home-row-meta"> · {statusLabel(d.status)} · unplaced</span>
+                </span>
                 {canPlace && <Link className="home-lk" to={`${href}${href.includes('?') ? '&' : '?'}q=${encodeURIComponent(d.hostname)}`}>Place</Link>}
               </div>
             ))}
