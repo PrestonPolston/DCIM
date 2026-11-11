@@ -112,19 +112,29 @@ export interface SearchCabinetItem {
   hall_id: number
   hall_name: string
 }
-/** A row or hall hit. hall_id is not in the committed contract (needed to link a row); compose fills it when it can. */
+/** A row hit. Official contract always includes hall_id/hall_name; keep null-safe so a missing hall stays unlinked. */
+export interface SearchRowItem {
+  id: number
+  label: string
+  name: string
+  hall_id: number | null
+  hall_name: string | null
+  site_id: number | null
+  site_name: string | null
+}
+/** A hall hit, with the site it belongs to. */
 export interface SearchPlaceItem {
   id: number
   label: string
   name: string
   site_id: number | null
   site_name: string | null
-  hall_id?: number | null
 }
+export type SearchHit = SearchDeviceItem | SearchCabinetItem | SearchRowItem | SearchPlaceItem
 export interface SearchGroupBase<K extends SearchGroupKey, T> { key: K; count: number; truncated: boolean; items: T[] }
 export type DeviceSearchGroup = SearchGroupBase<'devices', SearchDeviceItem>
 export type CabinetSearchGroup = SearchGroupBase<'cabinets', SearchCabinetItem>
-export type RowSearchGroup = SearchGroupBase<'rows', SearchPlaceItem>
+export type RowSearchGroup = SearchGroupBase<'rows', SearchRowItem>
 export type HallSearchGroup = SearchGroupBase<'halls', SearchPlaceItem>
 export type SearchGroup = DeviceSearchGroup | CabinetSearchGroup | RowSearchGroup | HallSearchGroup
 export interface HomeSearch {
@@ -153,7 +163,7 @@ export function emptySearch(query = ''): HomeSearch {
   }
 }
 
-export function searchHref(group: SearchGroupKey, item: SearchDeviceItem | SearchCabinetItem | SearchPlaceItem): string | undefined {
+export function searchHref(group: SearchGroupKey, item: SearchHit): string | undefined {
   if (group === 'devices') {
     const d = item as SearchDeviceItem
     return d.rack_id != null ? `/cabinets/${d.rack_id}?device=${d.id}` : `/devices?q=${encodeURIComponent(d.hostname)}`
@@ -163,11 +173,11 @@ export function searchHref(group: SearchGroupKey, item: SearchDeviceItem | Searc
     return c.hall_id ? `/halls/${c.hall_id}/cabinets/${c.id}` : `/cabinets/${c.id}`
   }
   if (group === 'halls') return `/halls/${item.id}`
-  const hallId = (item as SearchPlaceItem).hall_id
+  const hallId = (item as SearchRowItem).hall_id
   return hallId != null ? `/halls/${hallId}/rows/${item.id}` : undefined
 }
 
-export function searchSubtitle(group: SearchGroupKey, item: SearchDeviceItem | SearchCabinetItem | SearchPlaceItem): string | undefined {
+export function searchSubtitle(group: SearchGroupKey, item: SearchHit): string | undefined {
   if (group === 'devices') {
     const d = item as SearchDeviceItem
     const place = d.rack_id != null ? `${d.rack_name ?? 'Cabinet'} · RU${d.position_u ?? '?'}` : 'No position'
@@ -176,6 +186,10 @@ export function searchSubtitle(group: SearchGroupKey, item: SearchDeviceItem | S
   if (group === 'cabinets') {
     const c = item as SearchCabinetItem
     return [c.row_name, c.hall_name].filter(Boolean).join(' · ')
+  }
+  if (group === 'rows') {
+    const r = item as SearchRowItem
+    return [r.hall_name, r.site_name].filter(Boolean).join(' · ') || undefined
   }
   const p = item as SearchPlaceItem
   return p.site_name ?? undefined
@@ -366,7 +380,8 @@ export async function composeSearch(q: string, limit = SEARCH_DEFAULT_LIMIT): Pr
       {
         key: 'rows', count: rows.total, truncated: rows.total > cap,
         items: rows.items.slice(0, cap).map((r) => ({
-          id: r.id, label: r.name, name: r.name, site_id: null, site_name: null, hall_id: r.hall_id,
+          id: r.id, label: r.name, name: r.name,
+          hall_id: r.hall_id, hall_name: null, site_id: null, site_name: null,
         })),
       },
       {

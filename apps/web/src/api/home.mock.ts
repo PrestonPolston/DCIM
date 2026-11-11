@@ -75,7 +75,7 @@ export const SEARCH_FIXTURES: HomeSearch = {
       { id: 12, label: 'R12', name: 'R12', row_id: 1, row_name: 'Row 3', hall_id: 1, hall_name: 'Hall 2' },
     ]},
     { key: 'rows', count: 1, truncated: false, items: [
-      { id: 1, label: 'Row 3', name: 'Row 3', site_id: 1, site_name: 'Site A', hall_id: 1 },
+      { id: 1, label: 'Row 3', name: 'Row 3', hall_id: 1, hall_name: 'Hall 2', site_id: 1, site_name: 'Site A' },
     ]},
     { key: 'halls', count: 1, truncated: false, items: [
       { id: 1, label: 'Hall 2', name: 'Hall 2', site_id: 1, site_name: 'Site A' },

@@ -91,17 +91,18 @@ export default function HomeSearch() {
                 {g.items.map((item) => {
                   const href = searchHref(g.key, item)
                   const subtitle = searchSubtitle(g.key, item)
+                  const title = subtitle ? `${item.label} · ${subtitle}` : item.label
                   const body = (
                     <>
-                      <span className="mono">{item.label}</span>
-                      {subtitle && <span className="hint">{subtitle}</span>}
+                      <span className="mono" title={item.label}>{item.label}</span>
+                      {subtitle && <span className="hint" title={subtitle}>{subtitle}</span>}
                     </>
                   )
                   return (
                     <li key={`${g.key}-${item.id}`}>
                       {href
-                        ? <Link role="option" to={href} onClick={() => setOpen(false)}>{body}</Link>
-                        : <span role="option" aria-disabled="true">{body}</span>}
+                        ? <Link role="option" to={href} title={title} onClick={() => setOpen(false)}>{body}</Link>
+                        : <span role="option" aria-disabled="true" title={title}>{body}</span>}
                     </li>
                   )
                 })}

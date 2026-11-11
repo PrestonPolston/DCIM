@@ -148,7 +148,7 @@ describe('compose from existing endpoints', () => {
     expect(searchHref('cabinets', cabinets!.items[0])).toBe('/cabinets/12')
     const row = await composeSearch('Row')
     const rows = row.groups.find((g) => g.key === 'rows')
-    expect(rows?.items).toEqual([expect.objectContaining({ label: 'Row 3', name: 'Row 3', hall_id: 1 })])
+    expect(rows?.items).toEqual([expect.objectContaining({ label: 'Row 3', name: 'Row 3', hall_id: 1, hall_name: null })])
     expect(searchHref('rows', rows!.items[0])).toBe('/halls/1/rows/1')
     const dev = await composeSearch('web-01')
     const devices = dev.groups.find((g) => g.key === 'devices')
@@ -191,11 +191,12 @@ describe('searchHref and searchSubtitle', () => {
     const cabinet = { id: 12, label: 'R12', name: 'R12', row_id: 1, row_name: 'Row 3', hall_id: 1, hall_name: 'Hall 2' }
     expect(searchHref('cabinets', cabinet)).toBe('/halls/1/cabinets/12')
     expect(searchSubtitle('cabinets', cabinet)).toBe('Row 3 · Hall 2')
-    const row = { id: 1, label: 'Row 3', name: 'Row 3', site_id: 1, site_name: 'Site A', hall_id: 1 }
+    const row = { id: 1, label: 'Row 3', name: 'Row 3', hall_id: 1, hall_name: 'Hall 2', site_id: 1, site_name: 'Site A' }
     expect(searchHref('rows', row)).toBe('/halls/1/rows/1')
-    expect(searchSubtitle('rows', row)).toBe('Site A')
-    const rowNoHall = { id: 1, label: 'Row 3', name: 'Row 3', site_id: 1, site_name: 'Site A' }
+    expect(searchSubtitle('rows', row)).toBe('Hall 2 · Site A')
+    const rowNoHall = { id: 1, label: 'Row 3', name: 'Row 3', hall_id: null, hall_name: null, site_id: 1, site_name: 'Site A' }
     expect(searchHref('rows', rowNoHall)).toBeUndefined()
+    expect(searchSubtitle('rows', rowNoHall)).toBe('Site A')
     const hall = { id: 1, label: 'Hall 2', name: 'Hall 2', site_id: 1, site_name: 'Site A' }
     expect(searchHref('halls', hall)).toBe('/halls/1')
     expect(searchSubtitle('halls', hall)).toBe('Site A')
