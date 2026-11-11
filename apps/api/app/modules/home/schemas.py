@@ -1,4 +1,4 @@
-"""Response models for GET /home/summary."""
+"""Response models for GET /home/summary and GET /home/search."""
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_serializer
@@ -126,3 +126,72 @@ class HomeSummary(BaseModel):
         if data.get("admin") is None:
             data.pop("admin", None)
         return data
+
+
+
+class SearchDeviceItem(BaseModel):
+    id: int
+    label: str
+    hostname: str
+    serial: str | None
+    status: str
+    rack_id: int | None
+    rack_name: str | None
+    position_u: int | None
+
+
+class SearchCabinetItem(BaseModel):
+    id: int
+    label: str
+    name: str
+    row_id: int
+    row_name: str
+    hall_id: int
+    hall_name: str
+
+
+class SearchPlaceItem(BaseModel):
+    """A row or hall hit, with the site it belongs to."""
+    id: int
+    label: str
+    name: str
+    site_id: int
+    site_name: str
+
+
+class DeviceSearchGroup(BaseModel):
+    key: Literal["devices"] = "devices"
+    count: int
+    truncated: bool
+    items: list[SearchDeviceItem]
+
+
+class CabinetSearchGroup(BaseModel):
+    key: Literal["cabinets"] = "cabinets"
+    count: int
+    truncated: bool
+    items: list[SearchCabinetItem]
+
+
+class RowSearchGroup(BaseModel):
+    key: Literal["rows"] = "rows"
+    count: int
+    truncated: bool
+    items: list[SearchPlaceItem]
+
+
+class HallSearchGroup(BaseModel):
+    key: Literal["halls"] = "halls"
+    count: int
+    truncated: bool
+    items: list[SearchPlaceItem]
+
+
+SearchGroup = DeviceSearchGroup | CabinetSearchGroup | RowSearchGroup | HallSearchGroup
+
+
+class HomeSearch(BaseModel):
+    query: str
+    generated_at: str = Field(description="UTC instant this payload was built, ISO 8601 with Z")
+    groups: list[SearchGroup]
+    parked: list[ParkedTile]

@@ -1,1 +1,1 @@
-"""Post-login home summary (GET /home/summary)."""
+"""Post-login home summary and quick search."""

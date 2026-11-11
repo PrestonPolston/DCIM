@@ -6889,6 +6889,66 @@
         }
       }
     },
+    "/home/search": {
+      "get": {
+        "tags": [
+          "home"
+        ],
+        "summary": "Get Home Search",
+        "description": "Quick search across devices, cabinets, rows and halls. DCREQ search is parked.",
+        "operationId": "get_home_search_home_search_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 100,
+              "description": "Case-insensitive substring; at least 2 characters after trimming",
+              "title": "Q"
+            },
+            "description": "Case-insensitive substring; at least 2 characters after trimming"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 20,
+              "minimum": 1,
+              "description": "Maximum hits per group",
+              "default": 5,
+              "title": "Limit"
+            },
+            "description": "Maximum hits per group"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HomeSearch"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/": {
       "get": {
         "summary": "Root",
@@ -8114,6 +8174,38 @@
           "missing"
         ],
         "title": "CabinetReadiness"
+      },
+      "CabinetSearchGroup": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "const": "cabinets",
+            "title": "Key",
+            "default": "cabinets"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SearchCabinetItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "count",
+          "truncated",
+          "items"
+        ],
+        "title": "CabinetSearchGroup"
       },
       "Cable": {
         "properties": {
@@ -10348,6 +10440,38 @@
         "type": "object",
         "title": "DeviceProfileUpdate"
       },
+      "DeviceSearchGroup": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "const": "devices",
+            "title": "Key",
+            "default": "devices"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SearchDeviceItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "count",
+          "truncated",
+          "items"
+        ],
+        "title": "DeviceSearchGroup"
+      },
       "DeviceType": {
         "properties": {
           "manufacturer": {
@@ -11686,6 +11810,38 @@
         ],
         "title": "HallLayout"
       },
+      "HallSearchGroup": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "const": "halls",
+            "title": "Key",
+            "default": "halls"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SearchPlaceItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "count",
+          "truncated",
+          "items"
+        ],
+        "title": "HallSearchGroup"
+      },
       "HallUpdate": {
         "properties": {
           "aisle_axis": {
@@ -11737,6 +11893,54 @@
         "additionalProperties": false,
         "type": "object",
         "title": "HallUpdate"
+      },
+      "HomeSearch": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "title": "Query"
+          },
+          "generated_at": {
+            "type": "string",
+            "title": "Generated At",
+            "description": "UTC instant this payload was built, ISO 8601 with Z"
+          },
+          "groups": {
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/DeviceSearchGroup"
+                },
+                {
+                  "$ref": "#/components/schemas/CabinetSearchGroup"
+                },
+                {
+                  "$ref": "#/components/schemas/RowSearchGroup"
+                },
+                {
+                  "$ref": "#/components/schemas/HallSearchGroup"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Groups"
+          },
+          "parked": {
+            "items": {
+              "$ref": "#/components/schemas/ParkedTile"
+            },
+            "type": "array",
+            "title": "Parked"
+          }
+        },
+        "type": "object",
+        "required": [
+          "query",
+          "generated_at",
+          "groups",
+          "parked"
+        ],
+        "title": "HomeSearch"
       },
       "HomeSummary": {
         "properties": {
@@ -14489,6 +14693,38 @@
         ],
         "title": "RowLayout"
       },
+      "RowSearchGroup": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "const": "rows",
+            "title": "Key",
+            "default": "rows"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SearchPlaceItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "count",
+          "truncated",
+          "items"
+        ],
+        "title": "RowSearchGroup"
+      },
       "RowUpdate": {
         "properties": {
           "pos_x": {
@@ -14554,6 +14790,159 @@
         "additionalProperties": false,
         "type": "object",
         "title": "RowUpdate"
+      },
+      "SearchCabinetItem": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "row_id": {
+            "type": "integer",
+            "title": "Row Id"
+          },
+          "row_name": {
+            "type": "string",
+            "title": "Row Name"
+          },
+          "hall_id": {
+            "type": "integer",
+            "title": "Hall Id"
+          },
+          "hall_name": {
+            "type": "string",
+            "title": "Hall Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "name",
+          "row_id",
+          "row_name",
+          "hall_id",
+          "hall_name"
+        ],
+        "title": "SearchCabinetItem"
+      },
+      "SearchDeviceItem": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "hostname": {
+            "type": "string",
+            "title": "Hostname"
+          },
+          "serial": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Serial"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "rack_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rack Id"
+          },
+          "rack_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rack Name"
+          },
+          "position_u": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position U"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "hostname",
+          "serial",
+          "status",
+          "rack_id",
+          "rack_name",
+          "position_u"
+        ],
+        "title": "SearchDeviceItem"
+      },
+      "SearchPlaceItem": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "site_id": {
+            "type": "integer",
+            "title": "Site Id"
+          },
+          "site_name": {
+            "type": "string",
+            "title": "Site Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "name",
+          "site_id",
+          "site_name"
+        ],
+        "title": "SearchPlaceItem",
+        "description": "A row or hall hit, with the site it belongs to."
       },
       "Site": {
         "properties": {
