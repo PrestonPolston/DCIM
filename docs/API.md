@@ -33,6 +33,7 @@ Base URL in dev: `http://127.0.0.1:8000`. The full schema is in `apps/api/openap
 | `/projects/{id}/contacts` | **contact_id**, **contact_role** (`dc | vendor | other`), title; DELETE `/projects/{id}/contacts/{contact_id}?contact_role=` | |
 | `/users` (admin) | **email**, **role**, display_name, temporary_password (omit to generate); PATCH role / is_active; `POST /users/{id}/reset-password`, `/unlock` | |
 | `/audit-events` (admin, GET only) | append-only log: actor, action, entity, before/after, request id, `via` (api, script, migration, csv_import), `retention_class` (standard, or restorable = deletion snapshots, kept ≥ 24 months and excluded from the 13-month purge; `DCIM_RESTORABLE_RETENTION_MONTHS`) | see openapi |
+| `/home/summary` (any signed-in role) | post-login home tiles: counts and capped lists. `my_work` for every role; `admin` only for admins (omitted, not null, for others). See "Home summary" below | |
 
 Each resource has `GET` and `POST` on `/{resource}`, plus `GET`, `PATCH`, and `DELETE` (returns 204) on `/{resource}/{id}`. A parent's ID (for example `site_id`) cannot be changed with PATCH.
 
@@ -135,9 +136,104 @@ A flat, paginated list of every device-type profile, for the palette and for rep
 - **Filters:** `device_type_id`, `q` (profile name, manufacturer or model), `manufacturer` (exact, case-insensitive), `asset_type`, `status` (repeatable: `draft|published|retired`), `in_use=true|false`.
 - **Sort:** `sort=manufacturer,model,name` (default). Fields are `id`, `name`, `manufacturer`, `model`, `u_height` and `device_count`; a leading `-` means descending, and any other field returns 422.
 - **Paging:** `limit`/`offset`, with the total in `X-Total-Count`.
-- **Item fields:** `{id, name, device_type_id, manufacturer, model, u_height, is_full_depth, width_mm, height_mm, depth_mm, power_type, airflow, asset_type, effective_asset_type, color_hex, is_default, status, device_count, front_image: {url, thumb_url} | null, front_image_url (deprecated alias, null)}`.
-- **Interim `status`:** until `p1_17_profile_template` adds a real status column, `published` means complete for placement (dimensions, `power_type`, `u_height` ≥ 1) and everything else is `draft`. No profile is `retired` yet.
-- `front_image` stays `null` until profile images (`p1_15`) ship.
+- **Item fields:** `{id, name, device_type_id, manufacturer, model, u_height, is_full_depth, width_mm, height_mm, depth_mm, power_type, airflow, asset_type, effective_asset_type, color_hex, is_default, status, readiness, usable, usable_issue, usable_issues, mounting, weight_kg, orientation, device_count, published_at, retired_at, updated_at, front_image, rear_image, front_image_url (deprecated alias)}`. Other existing fields are unchanged.
+- **Timestamps:** `published_at`, `retired_at` and `updated_at` are ISO 8601 UTC with a trailing `Z` (e.g. `2026-11-11T14:00:00Z`). They are `null` when unknown (a draft has no `published_at` / `retired_at`). Naive values stored in the database are treated as UTC; Postgres session-timezone values are converted to UTC before serialization.
+
+
+## Home summary: `GET /home/summary`
+Any signed-in role. 401 without a session. One payload for the post-login home tiles this role can see. All timestamps are ISO 8601 UTC with a trailing `Z`, including top-level `generated_at` (the single `now` used for every window in that request).
+
+**Role split.** Every role gets `my_work`. Admins also get `admin`. Technicians and read-only users do **not** receive an `admin` key at all (it is omitted, not `null`).
+
+**Parked tiles** (jobs, DCREQs, held ePIF imports, workload, and the power/port rows on Device issues) are `{key, status: "not_available", message}` with a short reason and **no** counts, items, or other numeric fields. They are placeholders until those features exist.
+
+**Capped lists** are `{count, truncated, items[]}` (`count` is the full total; `truncated` is true when `count` is greater than the number of items returned). Profile-health lists are capped at `HOME_LIST_LIMIT` (5). Unpositioned devices are capped at `UNPOSITIONED_DEVICE_LIMIT` (10). Where the existing list endpoints can express the same set, a `filter` query string is included (`GET /profiles?...` or `GET /devices?...`).
+
+**Thresholds** (named constants): a draft is stale when `updated_at` is at least **14 days** ago (inclusive); a retired profile is recent when `retired_at` is within the last **30 days** (inclusive). Device profiles only (not cabinet profiles). Needs-review uses the existing `usability()` / `usable_issues` rule (published and not usable); it is not reimplemented.
+
+**Item shapes**
+- Needs review: `{id, name, usable_issue, usable_issues}`. `name` is `"<manufacturer> <model> · <profile name>"`.
+- Stale drafts: `{id, name, updated_at}`.
+- Recently retired: `{id, name, retired_at}`.
+- Recently changed: `{id, name, status, updated_at, published_at, retired_at}` (`published_at` / `retired_at` are `null` when not set), newest `updated_at` first.
+- Unpositioned devices: `{id, hostname, status, updated_at}`. `hostname` is the device's `host_name`. Only `install` and `active` devices with no `rack_id` (decom is excluded). Clients link by `id`.
+
+### Example: technician (and read-only — same shape)
+```json
+{
+  "generated_at": "2026-11-11T14:00:00Z",
+  "my_work": {
+    "jobs": {"key": "jobs", "status": "not_available", "message": "Needs jobs/DCREQ logic."},
+    "dcreqs": {"key": "dcreqs", "status": "not_available", "message": "Needs jobs/DCREQ logic."},
+    "held_imports": {"key": "held_imports", "status": "not_available", "message": "Held ePIF import rows are not in the API yet."}
+  }
+}
+```
+
+### Example: admin
+```json
+{
+  "generated_at": "2026-11-11T14:00:00Z",
+  "my_work": {
+    "jobs": {"key": "jobs", "status": "not_available", "message": "Needs jobs/DCREQ logic."},
+    "dcreqs": {"key": "dcreqs", "status": "not_available", "message": "Needs jobs/DCREQ logic."},
+    "held_imports": {"key": "held_imports", "status": "not_available", "message": "Held ePIF import rows are not in the API yet."}
+  },
+  "admin": {
+    "profile_health": {
+      "key": "profile_health",
+      "by_status": {"draft": 4, "published": 20, "retired": 2},
+      "needs_review": {
+        "count": 3,
+        "truncated": false,
+        "items": [
+          {"id": 11, "name": "Acme Srv · NoRear", "usable_issue": "rear_image_missing", "usable_issues": ["rear_image_missing"]}
+        ],
+        "by_issue": {"rear_image_missing": 2, "orientation_missing": 1},
+        "filter": "status=published&usable=false"
+      },
+      "stale_drafts": {
+        "count": 4,
+        "truncated": false,
+        "items": [
+          {"id": 8, "name": "Acme X100 · Default", "updated_at": "2026-10-20T14:00:00Z"}
+        ],
+        "filter": "status=draft"
+      },
+      "recently_retired": {
+        "count": 2,
+        "truncated": false,
+        "items": [
+          {"id": 9, "name": "Acme Racks 42U · Old", "retired_at": "2026-11-05T14:00:00Z"}
+        ],
+        "filter": "status=retired"
+      },
+      "recently_changed": {
+        "count": 26,
+        "truncated": true,
+        "items": [
+          {"id": 11, "name": "Acme Srv · NoRear", "status": "published", "updated_at": "2026-11-10T14:00:00Z", "published_at": "2026-11-01T14:00:00Z", "retired_at": null}
+        ]
+      }
+    },
+    "device_issues": {
+      "key": "device_issues",
+      "no_position": {
+        "count": 7,
+        "truncated": false,
+        "items": [
+          {"id": 12, "hostname": "r01c03-srv-09", "status": "install", "updated_at": "2026-11-10T14:00:00Z"}
+        ],
+        "filter": "status=install&status=active&unplaced=true"
+      },
+      "needs_power_assignment": {"key": "needs_power_assignment", "status": "not_available", "message": "Needs device_psu_assignments; devices.power_assignment is free text only."},
+      "port_conflicts": {"key": "port_conflicts", "status": "not_available", "message": "Port conflicts are refused at write time; there is no stored flag."},
+      "open_power_mismatches": {"key": "open_power_mismatches", "status": "not_available", "message": "The power_mismatches table and route are not built."}
+    },
+    "workload": {"key": "workload", "status": "not_available", "message": "Needs jobs/DCREQ logic."}
+  }
+}
+```
 
 ## Connections (v1)
 A baseline subset of DB item 11. It has device ports, cables (types `RJ45`, `LC`, `DAC`), and a connection between exactly two ports. **A connection has no status column.** The client derives it from the two end devices: if either end is `decom` it is **decom**; otherwise if either end is `install` it is **install**; otherwise **active**. The server returns this as `derived_status`. Not built yet: patch-panel paths (hops), breakout lanes, and connection history beyond audit events.
