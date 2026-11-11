@@ -6,6 +6,7 @@ import { defineConfig } from 'vite'
 export default defineConfig({
   plugins: [react()],
   server: {
+    strictPort: true,
     // In dev, requests to /api are proxied to the FastAPI server (avoids CORS).
     proxy: {
       '/api': {
@@ -14,6 +15,9 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/api/, ''),
       },
     },
+  },
+  preview: {
+    strictPort: true,
   },
   test: {
     environment: 'jsdom',

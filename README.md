@@ -54,7 +54,23 @@ npm ci
 npm run dev
 ```
 
-Vite serves `http://127.0.0.1:5173`. The app calls `/api` (`VITE_API_URL` in `apps/web/.env.example`, default `/api`). The dev server proxies `/api` to `http://localhost:8000` and strips the `/api` prefix. Override the target with `API_PROXY_TARGET` if the API is not on port 8000. Keep the dev server on localhost so the API sees a local client.
+Vite serves `http://localhost:5173`. The dev server is configured with `strictPort: true` (and the same for `vite preview`), so it exits if that port is already in use instead of silently moving to another port.
+
+The app calls `/api` (`VITE_API_URL` in `apps/web/.env.example`, default `/api`). The dev server proxies `/api` to `http://localhost:8000` and strips the `/api` prefix. Override the target with `API_PROXY_TARGET` if the API is not on port 8000.
+
+The API's CSRF/login Origin check defaults to allowing `http://localhost:5173` and `http://127.0.0.1:5173`. Set this with `DCIM_TRUSTED_ORIGINS` (a comma-separated list of full origins: scheme, host, and port). A value **replaces** the default list; it does not add to it. The Vite proxy uses `changeOrigin: true`, so the API sees a `Host` header for the proxy target (for example `localhost:8000`) and cannot treat the browser's `Origin` as same-origin. If you run the web dev server on another port, start the API with that origin included, for example:
+
+```bash
+DCIM_TRUSTED_ORIGINS=http://localhost:5273,http://127.0.0.1:5273
+```
+
+Or keep the defaults and add the extra origin:
+
+```bash
+DCIM_TRUSTED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,http://localhost:5273
+```
+
+Otherwise sign-in fails with 403 `Origin not allowed`. Do not disable or loosen the Origin check. Keep the dev server on localhost so the API sees a local client.
 
 Sign in with the email and password you passed to `create_admin`.
 
