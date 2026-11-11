@@ -16,8 +16,8 @@ beforeEach(() => {
 })
 
 describe('hall floor plan and tree', () => {
-  it('home redirects to the first hall and shows cabinet tiles with usage', async () => {
-    renderWithProviders(<App />, '/')
+  it('hall route shows cabinet tiles with usage', async () => {
+    renderWithProviders(<App />, '/halls/1')
     const tile = await screen.findByRole('link', { name: /Cabinet R12, 2 of 53 RU used, 51 free, front faces S \(default for odd rows\)/ })
     expect(screen.getByRole('link', { name: /Cabinet R13, 0 of 42 RU used, 42 free/ })).toHaveClass('empty')
     expect(tile).toHaveAttribute('href', '/halls/1/cabinets/12')

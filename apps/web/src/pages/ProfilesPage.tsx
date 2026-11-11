@@ -37,7 +37,7 @@ export default function ProfilesPage() {
   const status = (params.get('status') as ProfileFilters['status']) || 'all'
   const filters: ProfileFilters = { status, q: params.get('q') ?? '', assetType: params.get('asset_type') ?? undefined }
   const needsImage = params.get('needs_image') === '1'
-  const review = params.get('review') === '1'
+  const review = params.get('review') === '1' || params.get('usable') === 'false'
   const orientation = params.get('orientation')
   const { items, all, isPending, error } = useProfiles(filters)
   const bulk = params.get('bulk')

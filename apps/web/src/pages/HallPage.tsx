@@ -1,18 +1,9 @@
 import { useMemo } from 'react'
-import { Navigate, useParams } from 'react-router'
-import { useHallLayout, useHalls, useLookups } from '../api/racks'
+import { useParams } from 'react-router'
+import { useHallLayout, useLookups } from '../api/racks'
 import FloorPlan from '../components/floorplan/FloorPlan'
 import { useHallSettings } from '../components/floorplan/useHallSettings'
 import { layoutHall } from '../lib/hallLayout'
-
-/** Home: redirect to the first data hall. */
-export function HomePage() {
-  const { data, isPending, error } = useHalls()
-  if (isPending) return <p>Loading…</p>
-  if (error) return <p className="error" role="alert">{error.message}</p>
-  const first = data.items[0]
-  return first ? <Navigate to={`/halls/${first.id}`} replace /> : <p className="hint">No data halls yet.</p>
-}
 
 export default function HallPage() {
   const id = Number(useParams().hallId)

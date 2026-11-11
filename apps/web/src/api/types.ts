@@ -50,7 +50,7 @@ export interface DeviceType { id: number; manufacturer: string; name: string; u_
 export interface Page<T> { items: T[]; total: number }
 
 export interface ListParams { limit?: number; offset?: number; q?: string }
-export interface DeviceListParams extends ListParams { rack_id?: number; device_type_id?: number; status?: string; unplaced?: boolean; needs_review?: boolean }
+export interface DeviceListParams extends ListParams { rack_id?: number; device_type_id?: number; status?: string | string[]; unplaced?: boolean; needs_review?: boolean }
 
 export type Orientation = 'N' | 'E' | 'S' | 'W'
 

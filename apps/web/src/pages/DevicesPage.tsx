@@ -19,7 +19,9 @@ export default function DevicesPage() {
   const [params, setParams] = useSearchParams()
   const q = params.get('q') ?? ''
   const rackFilter = params.get('rack_id') ?? ''
-  const statusFilter = params.get('status') ?? ''
+  const statuses = params.getAll('status').filter(Boolean)
+  const statusFilter = statuses.length === 1 ? statuses[0] : ''
+  const unplaced = params.get('unplaced') === 'true'
   const offset = Number(params.get('offset') ?? 0)
 
   // Debounce the search box before hitting the server-side q filter.
@@ -32,7 +34,8 @@ export default function DevicesPage() {
 
   const devicesQuery = useDevices({
     q: debouncedQ || undefined,
-    status: statusFilter || undefined,
+    status: statuses.length > 1 ? statuses : statusFilter || undefined,
+    unplaced: unplaced || undefined,
     rack_id: rackFilter ? Number(rackFilter) : undefined,
     limit: PAGE_SIZE,
     offset,
@@ -96,6 +99,7 @@ export default function DevicesPage() {
         </select>
       </div>
 
+      {unplaced && <p className="hint" role="status">Showing unplaced devices.</p>}
       {!canWrite && <p className="hint" role="note">Your role is read-only: you can browse and export, but not change devices.</p>}
       {error && <p className="error" role="alert">{error}</p>}
 

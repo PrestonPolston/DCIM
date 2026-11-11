@@ -1,11 +1,25 @@
 import { useState } from 'react'
-import { Link, NavLink, Outlet, useNavigate } from 'react-router'
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router'
 import { useLogout, useMe } from '../auth/auth'
 import { roleLabel } from '../auth/permissions'
+import { useHalls } from '../api/racks'
+import HomeSearch from './home/HomeSearch'
 import Tree from './Tree'
+
+function HallNavLink() {
+  const halls = useHalls()
+  const path = useLocation().pathname
+  const first = halls.data?.items[0]
+  if (!first) return null
+  const on = path.startsWith('/halls/')
+  return (
+    <NavLink to={`/halls/${first.id}`} className={on ? 'active' : undefined}>Hall</NavLink>
+  )
+}
 
 // App shell: 56px top bar, tree panel (280px; drawer on phones), main view.
 export default function Layout() {
+
   const [drawer, setDrawer] = useState(false)
   const me = useMe().data
   const logout = useLogout()
@@ -19,11 +33,14 @@ export default function Layout() {
         <NavLink to="/" end className="brand">DCIM</NavLink>
         <NavLink to="/search" className="search-link" aria-label="Search devices by host name or serial">🔍</NavLink>
         <nav className="topnav" aria-label="Main">
+          <NavLink to="/" end>Home</NavLink>
+          <HallNavLink />
           <NavLink to="/devices">Devices</NavLink>
           <NavLink to="/profiles">Profiles</NavLink>
           <NavLink to="/reports">Reports</NavLink>
           <NavLink to="/import">Import</NavLink>
         </nav>
+        <HomeSearch />
         {me && (
           <div className="usermenu">
             <Link to="/account/password" className="user" title="Change password">
@@ -38,6 +55,8 @@ export default function Layout() {
       <aside className="sidebar" onClick={(e) => (e.target as HTMLElement).closest('a') && setDrawer(false)}>
         {drawer && (
         <nav className="drawer-nav" aria-label="Main (phone)">
+          <NavLink to="/" end>Home</NavLink>
+          <HallNavLink />
           <NavLink to="/search">Search</NavLink>
           <NavLink to="/devices">Devices</NavLink>
           <NavLink to="/profiles">Profiles</NavLink>

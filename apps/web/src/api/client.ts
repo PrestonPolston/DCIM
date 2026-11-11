@@ -74,7 +74,11 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
 
 function qs(params: object): string {
   const s = new URLSearchParams()
-  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== '') s.set(k, String(v))
+  for (const [k, v] of Object.entries(params)) {
+    if (v === undefined || v === null || v === '') continue
+    if (Array.isArray(v)) v.forEach((x) => { if (x !== undefined && x !== null && x !== '') s.append(k, String(x)) })
+    else s.set(k, String(v))
+  }
   const str = s.toString()
   return str ? `?${str}` : ''
 }
