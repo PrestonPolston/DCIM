@@ -9,7 +9,7 @@ Local data-center inventory app: a FastAPI API and a Vite/React web app. Cabinet
 
 ## API
 
-From the repo root (each block is a subshell, so you can paste the following blocks in the same terminal without the `cd` changing your directory):
+From the repo root. Each block is a subshell, so you can paste them in order in the same terminal without `cd` changing your directory. Install and migrate first, then create the admin, then start the API. The server command stays in the foreground, so create the admin before you start it (the CLI does not need the API to be running).
 
 ```bash
 (
@@ -17,19 +17,14 @@ cd apps/api
 python3.13 -m venv .venv
 .venv/bin/pip install --require-hashes -r requirements.txt -r requirements-dev.txt
 .venv/bin/alembic upgrade head
-.venv/bin/python -m app --reload
 )
 ```
 
 `alembic upgrade head` creates or updates the local SQLite file `apps/api/dcim.db` (`DCIM_DATABASE_URL` defaults to `sqlite:///./dcim.db`). Migrations do not insert users.
 
-The server listens on `http://127.0.0.1:8000`. Change the address with `DCIM_BIND_HOST` and `DCIM_PORT`. `python -m app` starts uvicorn with proxy headers off.
-
-The dev fallback for `DCIM_SECRET_KEY` is rejected when `DCIM_ENV=prod`. Leave the default only for this local dev server, or set your own secret in the environment or in `apps/api/.env` (that file is gitignored).
-
 ### First admin
 
-No admin account is shipped. After you run the migrations, the database still has no users. Create one with the CLI (the API does not need to be running). It prompts for a password and does not accept a built-in password:
+No admin account is shipped. After you run the migrations, the database still has no users. Create one with the CLI before you start the API. It prompts for a password and does not accept a built-in password:
 
 ```bash
 (cd apps/api && .venv/bin/python -m app.scripts.create_admin --email you@example.com)
@@ -47,6 +42,16 @@ Users created in the app (`POST /users`) receive a temporary password (`temporar
 
 `scripts/seed_demo.py` is a separate, dev-only command documented in `apps/api/README.md`. The steps above do not run it, so its demo logins are not created.
 
+### Start the API
+
+```bash
+(cd apps/api && .venv/bin/python -m app --reload)
+```
+
+The server listens on `http://127.0.0.1:8000`. Change the address with `DCIM_BIND_HOST` and `DCIM_PORT`. `python -m app` starts uvicorn with proxy headers off.
+
+The dev fallback for `DCIM_SECRET_KEY` is rejected when `DCIM_ENV=prod`. Leave the default only for this local dev server, or set your own secret in the environment or in `apps/api/.env` (that file is gitignored).
+
 ## Web
 
 Open a second terminal. From the repo root:
@@ -59,21 +64,25 @@ npm run dev
 )
 ```
 
-Vite serves `http://localhost:5173`. The dev server is configured with `strictPort: true` (and the same for `vite preview`), so it exits if that port is already in use instead of silently moving to another port.
+Vite serves `http://localhost:5173`. Open that URL, not `http://127.0.0.1:5173`, unless you intend to. The Origin check (and CORS, if you set `DCIM_CORS_ORIGINS`) compares the browser's `Origin` as an exact string, so `http://localhost:5173` and `http://127.0.0.1:5173` are different origins.
 
-The app calls `/api` (`VITE_API_URL` in `apps/web/.env.example`, default `/api`). The dev server proxies `/api` to `http://localhost:8000` and strips the `/api` prefix. Override the target with `API_PROXY_TARGET` if the API is not on port 8000.
+The dev server is configured with `strictPort: true` (and the same for `vite preview`), so it exits if the address it binds is already in use instead of silently moving to another port. By default that bind is `localhost`, which may be `::1` only. A process that occupies only IPv4 (for example `0.0.0.0:5173`) can leave `[::1]:5173` free, in which case Vite still starts on IPv6 and `http://localhost:5173` and `http://127.0.0.1:5173` can reach different servers.
 
-The API's CSRF/login Origin check defaults to allowing `http://localhost:5173` and `http://127.0.0.1:5173`. Set this with `DCIM_TRUSTED_ORIGINS` (a comma-separated list of full origins: scheme, host, and port). A value **replaces** the default list; it does not add to it. The Vite proxy uses `changeOrigin: true`, so the API sees a `Host` header for the proxy target (for example `localhost:8000`) and cannot treat the browser's `Origin` as same-origin. If you run the web dev server on another port, start the API with that origin included, for example:
+The app calls `/api` (`VITE_API_URL` in `apps/web/.env.example`, default `/api`). The dev server proxies `/api` to `http://localhost:8000` and strips the `/api` prefix. `apps/web/vite.config.ts` reads `API_PROXY_TARGET` for that proxy target (default `http://localhost:8000`). The Vite proxy uses `changeOrigin: true`, so the API sees a `Host` header for the proxy target (for example `localhost:8000`) and cannot treat the browser's `Origin` as same-origin.
 
-```bash
-DCIM_TRUSTED_ORIGINS=http://localhost:5273,http://127.0.0.1:5273
-```
-
-Or keep the defaults and add the extra origin:
+The API's CSRF/login Origin check defaults to allowing `http://localhost:5173` and `http://127.0.0.1:5173`. Set this with `DCIM_TRUSTED_ORIGINS` (a comma-separated list of full origins: scheme, host, and port). A value **replaces** the default list; it does not add to it. Origins listed in `DCIM_CORS_ORIGINS` are also accepted by that check. Include both `localhost` and `127.0.0.1` for every port you will use. If you run the web dev server or the API on other ports, start both with matching settings, for example API on 8100 and Vite on 5273:
 
 ```bash
-DCIM_TRUSTED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,http://localhost:5273
+(cd apps/api && DCIM_PORT=8100 DCIM_TRUSTED_ORIGINS=http://localhost:5273,http://127.0.0.1:5273 .venv/bin/python -m app --reload)
 ```
+
+In the second terminal:
+
+```bash
+(cd apps/web && API_PROXY_TARGET=http://localhost:8100 npm run dev -- --port 5273)
+```
+
+To keep the defaults as well as an extra port, list every origin, including both host spellings, for example `DCIM_TRUSTED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,http://localhost:5273,http://127.0.0.1:5273`.
 
 Otherwise sign-in fails with 403 `Origin not allowed`. Do not disable or loosen the Origin check. Keep the dev server on localhost so the API sees a local client.
 
