@@ -3,7 +3,9 @@ from app.modules.images.refs import ProfileImageRef
 from app.enums import AssetTypeLiteral
 from datetime import date
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
+
+from app.timestamps import iso_z
 
 from app.enums import (AirflowLiteral, MountingLiteral, PowerTypeLiteral, ProfileOrientationLiteral,
                        ProfileStatusLiteral)
@@ -132,9 +134,15 @@ class DeviceProfile(OutputModel, DeviceProfileCreate):
     status: ProfileStatusLiteral = "draft"
     published_at: datetime | None = None
     retired_at: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
     published_by: str | None = None
     version: int = 1
     supersedes_profile_id: int | None = None
     readiness: Readiness | None = None
     front_image: ProfileImageRef | None = None
     rear_image: ProfileImageRef | None = None
+
+    @field_serializer("created_at", "updated_at", "published_at", "retired_at", when_used="json")
+    def _iso_z(self, value: datetime | None) -> str | None:
+        return iso_z(value)

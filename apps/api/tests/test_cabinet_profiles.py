@@ -377,7 +377,7 @@ def test_huge_inch_value_is_422_not_500(client):
     assert r.status_code == 422 and code(r) == "invalid_dimension"
 
 
-ISO_UTC = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?\+00:00$"
+ISO_UTC = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$"
 
 
 def _strings(obj):
@@ -411,4 +411,4 @@ def test_history_datetimes_iso_utc(client, engine):
     assert len(dts) >= 4  # published_at/retired_at in the listener diffs + delete snapshot (created/updated_at are not snapshotted)
     bad = [v for v in dts if not re.match(ISO_UTC, v)]
     assert not bad, bad
-    assert "2026-11-04T01:12:31.331192+00:00" in dts
+    assert "2026-11-04T01:12:31.331192Z" in dts

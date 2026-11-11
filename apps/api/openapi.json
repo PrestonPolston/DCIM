@@ -7825,7 +7825,7 @@
           "occurred_at": {
             "type": "string",
             "title": "Occurred At",
-            "description": "ISO 8601 UTC with +00:00, like every datetime inside before/after"
+            "description": "ISO 8601 UTC with a trailing Z, like every datetime inside before/after"
           },
           "action": {
             "type": "string",
@@ -9856,8 +9856,7 @@
           "published_at": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "type": "string"
               },
               {
                 "type": "null"
@@ -9868,14 +9867,35 @@
           "retired_at": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
             "title": "Retired At"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
           },
           "published_by": {
             "anyOf": [

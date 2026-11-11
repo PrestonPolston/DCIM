@@ -19,7 +19,7 @@ from app.modules.images import service as img_service
 from app.modules.images.router import ImageMeta, upload_limiter
 from app.pagination import Pagination, contains, paginate
 from app.settings import get_settings
-from app.timestamps import as_utc as _as_utc
+from app.timestamps import as_utc as _as_utc, iso_z
 
 
 def as_utc(v):
@@ -276,12 +276,12 @@ _DT = re.compile(r"^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?
 
 
 def iso_utc(v) -> str | None:
-    """Any datetime (or datetime-looking string, incl. old naive audit rows = UTC) -> 'YYYY-MM-DDTHH:MM:SS[.ffffff]+00:00'."""
+    """Any datetime (or datetime-looking string, incl. old naive audit rows = UTC) -> 'YYYY-MM-DDTHH:MM:SS[.ffffff]Z'."""
     if v is None:
         return None
     if isinstance(v, str):
         v = datetime.fromisoformat(v.replace("Z", "+00:00"))
-    return as_utc(v).isoformat()
+    return iso_z(v)
 
 
 def _norm(obj):

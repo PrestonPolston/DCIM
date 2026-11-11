@@ -101,7 +101,7 @@ class CabinetProfile(OutputModel):
 
 class CabinetProfileEvent(BaseModel):
     id: int
-    occurred_at: str = Field(description="ISO 8601 UTC with +00:00, like every datetime inside before/after")
+    occurred_at: str = Field(description="ISO 8601 UTC with a trailing Z, like every datetime inside before/after")
     action: str
     actor_email: str | None = None
     before: dict | None = None
