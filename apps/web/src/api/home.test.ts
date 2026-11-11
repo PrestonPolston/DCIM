@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   HOME_LIST_LIMIT, PARKED, RECENTLY_RETIRED_DAYS, STALE_DRAFT_DAYS, composeDeviceIssues, composeProfileHealth,
   composeSearch, composeSummary, daysLabel, daysSince, hrefForFilter, parkedMyWork, parseApiDate, profileDisplayName,
+  searchHref, searchSubtitle, SEARCH_DEFAULT_LIMIT, SEARCH_MIN,
 } from './home'
 import { PROFILE_FIXTURES, UNPLACED_FIXTURES, fixtureSummary } from './home.mock'
 import { installMockApi, resetAuth, seedDb, type Db } from '../test/mockApi'
@@ -129,22 +130,74 @@ describe('compose from existing endpoints', () => {
     expect(tech).not.toHaveProperty('admin')
   })
 
-  it('fans search out to device, cabinet, row and hall and parks DCREQ', async () => {
+  it('composes GET /home/search groups for device, cabinet, row and hall and parks DCREQ', async () => {
     resetAuth()
     setCsrfToken('csrf-1')
     installMockApi(seedDb())
     const r = await composeSearch('Hall')
-    expect(r.halls.some((h) => h.label === 'Hall 2' && h.href === '/halls/1')).toBe(true)
-    expect(r.dcreqs).toEqual(PARKED.dcreq_search)
+    expect(r.query).toBe('Hall')
+    expect(r.generated_at).toMatch(/Z$/)
+    const halls = r.groups.find((g) => g.key === 'halls')
+    expect(halls?.items.some((h) => h.label === 'Hall 2' && h.id === 1)).toBe(true)
+    expect(searchHref('halls', halls!.items[0])).toBe('/halls/1')
+    expect(r.parked).toEqual([PARKED.dcreq_search])
+    expect(PARKED.dcreq_search).toEqual({ key: 'dcreqs', status: 'not_available', message: 'DCREQ search is not available yet.' })
     const cab = await composeSearch('R12')
-    expect(cab.cabinets).toEqual([expect.objectContaining({ kind: 'cabinet', label: 'R12', href: '/cabinets/12' })])
+    const cabinets = cab.groups.find((g) => g.key === 'cabinets')
+    expect(cabinets?.items).toEqual([expect.objectContaining({ label: 'R12', name: 'R12', id: 12 })])
+    expect(searchHref('cabinets', cabinets!.items[0])).toBe('/cabinets/12')
     const row = await composeSearch('Row')
-    expect(row.rows).toEqual([expect.objectContaining({ kind: 'row', label: 'Row 3', href: '/halls/1/rows/1' })])
+    const rows = row.groups.find((g) => g.key === 'rows')
+    expect(rows?.items).toEqual([expect.objectContaining({ label: 'Row 3', name: 'Row 3', hall_id: 1 })])
+    expect(searchHref('rows', rows!.items[0])).toBe('/halls/1/rows/1')
     const dev = await composeSearch('web-01')
-    expect(dev.devices[0]).toMatchObject({ kind: 'device', label: 'web-01', href: '/cabinets/12?device=1' })
+    const devices = dev.groups.find((g) => g.key === 'devices')
+    expect(devices?.items[0]).toMatchObject({ label: 'web-01', hostname: 'web-01', rack_id: 12 })
+    expect(searchHref('devices', devices!.items[0])).toBe('/cabinets/12?device=1')
     const serial = await composeSearch('SN-A1')
-    expect(serial.devices[0].label).toBe('web-01')
-    const none = await composeSearch('x')
-    expect(none.devices).toEqual([])
+    expect(serial.groups.find((g) => g.key === 'devices')?.items[0].label).toBe('web-01')
+    const short = await composeSearch('x')
+    expect(short.query).toBe('x')
+    expect(short.groups.every((g) => g.items.length === 0 && g.count === 0 && !g.truncated)).toBe(true)
+    expect(SEARCH_MIN).toBe(2)
+    expect(SEARCH_DEFAULT_LIMIT).toBe(5)
+  })
+
+  it('marks a group truncated when the total is above the limit', async () => {
+    resetAuth()
+    setCsrfToken('csrf-1')
+    const db = seedDb()
+    for (let i = 0; i < 6; i++) db.racks.push({ id: 100 + i, row_id: 1, name: `Cab-${i}`, u_height: 42 })
+    installMockApi(db)
+    const r = await composeSearch('Cab', 5)
+    const cabinets = r.groups.find((g) => g.key === 'cabinets')
+    expect(cabinets).toMatchObject({ count: 6, truncated: true })
+    expect(cabinets?.items).toHaveLength(5)
+    const all = await composeSearch('Cab', 20)
+    const full = all.groups.find((g) => g.key === 'cabinets')
+    expect(full).toMatchObject({ count: 6, truncated: false })
+    expect(full?.items).toHaveLength(6)
+  })
+})
+
+describe('searchHref and searchSubtitle', () => {
+  it('links placed and unplaced devices, cabinets, rows and halls, and labels No position', () => {
+    const placed = { id: 1, label: 'web-01', hostname: 'web-01', serial: 'SN-A1', status: 'active', rack_id: 12, rack_name: 'R12', position_u: 20 }
+    expect(searchHref('devices', placed)).toBe('/cabinets/12?device=1')
+    expect(searchSubtitle('devices', placed)).toBe('R12 · RU20 · SN SN-A1')
+    const unplaced = { id: 10, label: 'spare-01', hostname: 'spare-01', serial: null, status: 'install', rack_id: null, rack_name: null, position_u: null }
+    expect(searchHref('devices', unplaced)).toBe('/devices?q=spare-01')
+    expect(searchSubtitle('devices', unplaced)).toBe('No position')
+    const cabinet = { id: 12, label: 'R12', name: 'R12', row_id: 1, row_name: 'Row 3', hall_id: 1, hall_name: 'Hall 2' }
+    expect(searchHref('cabinets', cabinet)).toBe('/halls/1/cabinets/12')
+    expect(searchSubtitle('cabinets', cabinet)).toBe('Row 3 · Hall 2')
+    const row = { id: 1, label: 'Row 3', name: 'Row 3', site_id: 1, site_name: 'Site A', hall_id: 1 }
+    expect(searchHref('rows', row)).toBe('/halls/1/rows/1')
+    expect(searchSubtitle('rows', row)).toBe('Site A')
+    const rowNoHall = { id: 1, label: 'Row 3', name: 'Row 3', site_id: 1, site_name: 'Site A' }
+    expect(searchHref('rows', rowNoHall)).toBeUndefined()
+    const hall = { id: 1, label: 'Hall 2', name: 'Hall 2', site_id: 1, site_name: 'Site A' }
+    expect(searchHref('halls', hall)).toBe('/halls/1')
+    expect(searchSubtitle('halls', hall)).toBe('Site A')
   })
 })

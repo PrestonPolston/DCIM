@@ -709,6 +709,10 @@ button.link, .link {
   min-height: var(--tap-min);
 }
 .home-search-group a:hover { background: var(--surface-2); }
+.home-search-group [role="option"][aria-disabled="true"] {
+  display: flex; flex-direction: column; gap: 1px; padding: 6px 8px; border-radius: 6px;
+}
+.home-search-show-all { display: inline-block; margin: 4px 8px 0; font-size: var(--fs-xs); }
 @media (min-width: 1025px) {
   .home-search { display: block; margin-left: auto; }
   .usermenu { margin-left: var(--space-3); }

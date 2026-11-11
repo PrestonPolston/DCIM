@@ -1,7 +1,6 @@
-// Home-page adapter for GET /home/summary (docs/API.md on feat/home-summary).
-// HOME_API.live defaults to true; tests flip it off and compose the same shape
-// from GET /profiles and GET /devices. There is no GET /home/search yet, so
-// quick search fans out to /devices, /racks, /rows and /halls (DCREQ is parked).
+// Home-page adapter for GET /home/summary and GET /home/search (docs/API.md on feat/home-summary).
+// HOME_API.live defaults to true; tests flip it off and compose the same shapes
+// from existing list endpoints (summary: /profiles, /devices; search: /devices, /racks, /rows, /halls).
 import { useQuery } from '@tanstack/react-query'
 import { ApiError, listPage, send } from './client'
 import { needsReview, toUiProfile, type ProfileListItem, type ProfileStatus } from './profiles'
@@ -17,7 +16,8 @@ export const RECENTLY_RETIRED_DAYS = 30
 export const HOME_LIST_LIMIT = 5
 export const UNPOSITIONED_DEVICE_LIMIT = 10
 export const SEARCH_MIN = 2
-export const SEARCH_LIMIT = 8
+export const SEARCH_DEFAULT_LIMIT = 5
+export const SEARCH_MAX_LIMIT = 20
 
 export interface ParkedTile { key: string; status: 'not_available'; message: string }
 
@@ -29,8 +29,7 @@ export const PARKED = {
   needs_power_assignment: { key: 'needs_power_assignment', status: 'not_available', message: 'Needs device_psu_assignments; devices.power_assignment is free text only.' } as ParkedTile,
   port_conflicts: { key: 'port_conflicts', status: 'not_available', message: 'Port conflicts are refused at write time; there is no stored flag.' } as ParkedTile,
   open_power_mismatches: { key: 'open_power_mismatches', status: 'not_available', message: 'The power_mismatches table and route are not built.' } as ParkedTile,
-  /** Client-only: there is no DCREQ q on the search endpoints yet. */
-  dcreq_search: { key: 'dcreq_search', status: 'not_available', message: 'Needs jobs/DCREQ logic.' } as ParkedTile,
+  dcreq_search: { key: 'dcreqs', status: 'not_available', message: 'DCREQ search is not available yet.' } as ParkedTile,
 }
 
 export function parkedMyWork(): MyWork {
@@ -93,19 +92,98 @@ export interface HomeSummary {
   admin?: HomeAdmin
 }
 
-export type SearchKind = 'device' | 'cabinet' | 'row' | 'hall'
-export interface HomeSearchHit { kind: SearchKind; id: number; label: string; href: string; subtitle?: string }
-export interface HomeSearchResults {
-  devices: HomeSearchHit[]
-  cabinets: HomeSearchHit[]
-  rows: HomeSearchHit[]
-  halls: HomeSearchHit[]
-  dcreqs: ParkedTile
+export type SearchGroupKey = 'devices' | 'cabinets' | 'rows' | 'halls'
+export interface SearchDeviceItem {
+  id: number
+  label: string
+  hostname: string
+  serial: string | null
+  status: string
+  rack_id: number | null
+  rack_name: string | null
+  position_u: number | null
+}
+export interface SearchCabinetItem {
+  id: number
+  label: string
+  name: string
+  row_id: number
+  row_name: string
+  hall_id: number
+  hall_name: string
+}
+/** A row or hall hit. hall_id is not in the committed contract (needed to link a row); compose fills it when it can. */
+export interface SearchPlaceItem {
+  id: number
+  label: string
+  name: string
+  site_id: number | null
+  site_name: string | null
+  hall_id?: number | null
+}
+export interface SearchGroupBase<K extends SearchGroupKey, T> { key: K; count: number; truncated: boolean; items: T[] }
+export type DeviceSearchGroup = SearchGroupBase<'devices', SearchDeviceItem>
+export type CabinetSearchGroup = SearchGroupBase<'cabinets', SearchCabinetItem>
+export type RowSearchGroup = SearchGroupBase<'rows', SearchPlaceItem>
+export type HallSearchGroup = SearchGroupBase<'halls', SearchPlaceItem>
+export type SearchGroup = DeviceSearchGroup | CabinetSearchGroup | RowSearchGroup | HallSearchGroup
+export interface HomeSearch {
+  query: string
+  generated_at: string
+  groups: SearchGroup[]
+  parked: ParkedTile[]
 }
 
 export interface HomeApi {
   summary(): Promise<HomeSummary>
-  search(q: string): Promise<HomeSearchResults>
+  search(q: string, limit?: number, signal?: AbortSignal): Promise<HomeSearch>
+}
+
+export function emptySearch(query = ''): HomeSearch {
+  return {
+    query,
+    generated_at: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+    groups: [
+      { key: 'devices', count: 0, truncated: false, items: [] },
+      { key: 'cabinets', count: 0, truncated: false, items: [] },
+      { key: 'rows', count: 0, truncated: false, items: [] },
+      { key: 'halls', count: 0, truncated: false, items: [] },
+    ],
+    parked: [PARKED.dcreq_search],
+  }
+}
+
+export function searchHref(group: SearchGroupKey, item: SearchDeviceItem | SearchCabinetItem | SearchPlaceItem): string | undefined {
+  if (group === 'devices') {
+    const d = item as SearchDeviceItem
+    return d.rack_id != null ? `/cabinets/${d.rack_id}?device=${d.id}` : `/devices?q=${encodeURIComponent(d.hostname)}`
+  }
+  if (group === 'cabinets') {
+    const c = item as SearchCabinetItem
+    return c.hall_id ? `/halls/${c.hall_id}/cabinets/${c.id}` : `/cabinets/${c.id}`
+  }
+  if (group === 'halls') return `/halls/${item.id}`
+  const hallId = (item as SearchPlaceItem).hall_id
+  return hallId != null ? `/halls/${hallId}/rows/${item.id}` : undefined
+}
+
+export function searchSubtitle(group: SearchGroupKey, item: SearchDeviceItem | SearchCabinetItem | SearchPlaceItem): string | undefined {
+  if (group === 'devices') {
+    const d = item as SearchDeviceItem
+    const place = d.rack_id != null ? `${d.rack_name ?? 'Cabinet'} · RU${d.position_u ?? '?'}` : 'No position'
+    return [place, d.serial ? `SN ${d.serial}` : null].filter(Boolean).join(' · ')
+  }
+  if (group === 'cabinets') {
+    const c = item as SearchCabinetItem
+    return [c.row_name, c.hall_name].filter(Boolean).join(' · ')
+  }
+  const p = item as SearchPlaceItem
+  return p.site_name ?? undefined
+}
+
+function clampLimit(limit: number | undefined): number {
+  const n = limit ?? SEARCH_DEFAULT_LIMIT
+  return Math.min(SEARCH_MAX_LIMIT, Math.max(1, n))
 }
 
 export function errMessage(e: unknown): string {
@@ -256,30 +334,58 @@ export async function fetchSummary(): Promise<HomeSummary> {
   return normalise((await res.json()) as HomeSummary)
 }
 
-export async function composeSearch(q: string): Promise<HomeSearchResults> {
+export async function composeSearch(q: string, limit = SEARCH_DEFAULT_LIMIT): Promise<HomeSearch> {
   const term = q.trim()
-  const empty: HomeSearchResults = { devices: [], cabinets: [], rows: [], halls: [], dcreqs: PARKED.dcreq_search }
-  if (term.length < SEARCH_MIN) return empty
+  if (term.length < SEARCH_MIN) return emptySearch(term)
+  const cap = clampLimit(limit)
   const [devices, cabinets, rows, halls] = await Promise.all([
-    listPage<Device>('/devices', { q: term, limit: SEARCH_LIMIT }),
-    listPage<Rack>('/racks', { q: term, limit: SEARCH_LIMIT }),
-    listPage<Row>('/rows', { q: term, limit: SEARCH_LIMIT }),
-    listPage<Hall>('/halls', { q: term, limit: SEARCH_LIMIT }),
+    listPage<Device>('/devices', { q: term, limit: cap }),
+    listPage<Rack>('/racks', { q: term, limit: cap }),
+    listPage<Row>('/rows', { q: term, limit: cap }),
+    listPage<Hall>('/halls', { q: term, limit: cap }),
   ])
+  const iso = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
   return {
-    devices: devices.items.map((d) => ({
-      kind: 'device' as const, id: d.id, label: d.host_name,
-      href: d.rack_id ? `/cabinets/${d.rack_id}?device=${d.id}` : `/devices?q=${encodeURIComponent(d.host_name)}`,
-      subtitle: d.serial_number ? `SN ${d.serial_number}` : d.status,
-    })),
-    cabinets: cabinets.items.map((r) => ({
-      kind: 'cabinet' as const, id: r.id, label: r.name,
-      href: r.hall_id ? `/halls/${r.hall_id}/cabinets/${r.id}` : `/cabinets/${r.id}`,
-    })),
-    rows: rows.items.map((r) => ({ kind: 'row' as const, id: r.id, label: r.name, href: `/halls/${r.hall_id}/rows/${r.id}` })),
-    halls: halls.items.map((h) => ({ kind: 'hall' as const, id: h.id, label: h.name, href: `/halls/${h.id}` })),
-    dcreqs: PARKED.dcreq_search,
+    query: term,
+    generated_at: iso,
+    groups: [
+      {
+        key: 'devices', count: devices.total, truncated: devices.total > cap,
+        items: devices.items.slice(0, cap).map((d) => ({
+          id: d.id, label: d.host_name, hostname: d.host_name, serial: d.serial_number,
+          status: d.status, rack_id: d.rack_id ?? null, rack_name: null, position_u: d.position_u ?? null,
+        })),
+      },
+      {
+        key: 'cabinets', count: cabinets.total, truncated: cabinets.total > cap,
+        items: cabinets.items.slice(0, cap).map((r) => ({
+          id: r.id, label: r.name, name: r.name,
+          row_id: r.row_id, row_name: '', hall_id: r.hall_id ?? 0, hall_name: '',
+        })),
+      },
+      {
+        key: 'rows', count: rows.total, truncated: rows.total > cap,
+        items: rows.items.slice(0, cap).map((r) => ({
+          id: r.id, label: r.name, name: r.name, site_id: null, site_name: null, hall_id: r.hall_id,
+        })),
+      },
+      {
+        key: 'halls', count: halls.total, truncated: halls.total > cap,
+        items: halls.items.slice(0, cap).map((h) => ({
+          id: h.id, label: h.name, name: h.name, site_id: h.site_id, site_name: null,
+        })),
+      },
+    ],
+    parked: [PARKED.dcreq_search],
   }
+}
+
+export async function fetchSearch(q: string, limit = SEARCH_DEFAULT_LIMIT, signal?: AbortSignal): Promise<HomeSearch> {
+  const term = q.trim()
+  if (term.length < SEARCH_MIN) return emptySearch(term)
+  const cap = clampLimit(limit)
+  const res = await send(`/home/search?q=${encodeURIComponent(term)}&limit=${cap}`, signal ? { signal } : {})
+  return (await res.json()) as HomeSearch
 }
 
 export function homeApi(): HomeApi {
@@ -292,23 +398,35 @@ export function homeApi(): HomeApi {
             throw e
           }
         },
-        search: (q) => composeSearch(q),
+        async search(q, limit, signal) {
+          try { return await fetchSearch(q, limit, signal) }
+          catch (e) {
+            if (e instanceof ApiError && (e.status === 404 || e.status === 501)) return composeSearch(q, limit)
+            throw e
+          }
+        },
       }
     : {
         summary: () => composeSummary(true),
-        search: (q) => composeSearch(q),
+        search: (q, limit) => composeSearch(q, limit),
       }
 }
 
 export const homeKeys = {
   all: ['home'] as const,
   summary: ['home', 'summary'] as const,
-  search: (q: string) => ['home', 'search', q] as const,
+  search: (q: string, limit: number) => ['home', 'search', q, limit] as const,
 }
 
 export function useHomeSummary() {
   return useQuery({ queryKey: homeKeys.summary, queryFn: () => homeApi().summary(), retry: false })
 }
-export function useHomeSearch(q: string, enabled: boolean) {
-  return useQuery({ queryKey: homeKeys.search(q), queryFn: () => homeApi().search(q), enabled: enabled && q.trim().length >= SEARCH_MIN, retry: false })
+export function useHomeSearch(q: string, enabled: boolean, limit = SEARCH_DEFAULT_LIMIT) {
+  const cap = clampLimit(limit)
+  return useQuery({
+    queryKey: homeKeys.search(q, cap),
+    queryFn: ({ signal }) => homeApi().search(q, cap, signal),
+    enabled: enabled && q.trim().length >= SEARCH_MIN,
+    retry: false,
+  })
 }

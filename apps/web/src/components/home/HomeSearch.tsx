@@ -1,32 +1,44 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
-import { SEARCH_MIN, useHomeSearch, type HomeSearchHit, type SearchKind } from '../../api/home'
+import {
+  PARKED, SEARCH_DEFAULT_LIMIT, SEARCH_MAX_LIMIT, SEARCH_MIN,
+  searchHref, searchSubtitle, useHomeSearch,
+  type SearchGroup, type SearchGroupKey,
+} from '../../api/home'
 
-const GROUPS: [SearchKind, string, 'devices' | 'cabinets' | 'rows' | 'halls'][] = [
-  ['device', 'Devices', 'devices'],
-  ['cabinet', 'Cabinets', 'cabinets'],
-  ['row', 'Rows', 'rows'],
-  ['hall', 'Halls', 'halls'],
-]
+const GROUP_LABEL: Record<SearchGroupKey, string> = {
+  devices: 'Devices',
+  cabinets: 'Cabinets',
+  rows: 'Rows',
+  halls: 'Halls',
+}
 
 function isTypingTarget(t: EventTarget | null): boolean {
   if (!(t instanceof HTMLElement)) return false
   return !!t.closest('input, textarea, select, [contenteditable="true"]')
 }
 
-/** Header quick search: `/` focuses it. Fans out to device, cabinet, row and hall; DCREQ is parked. */
+function groupOf(groups: SearchGroup[] | undefined, key: SearchGroupKey): SearchGroup | undefined {
+  return groups?.find((g) => g.key === key)
+}
+
+/** Header quick search: `/` focuses it. GET /home/search; DCREQ is parked. */
 export default function HomeSearch() {
   const input = useRef<HTMLInputElement>(null)
   const wrap = useRef<HTMLDivElement>(null)
   const [value, setValue] = useState('')
   const [open, setOpen] = useState(false)
-  const [q, setQ] = useState('')
+  const [query, setQuery] = useState({ q: '', limit: SEARCH_DEFAULT_LIMIT })
   useEffect(() => {
-    const t = setTimeout(() => setQ(value.trim()), 200)
+    const t = setTimeout(() => {
+      const next = value.trim()
+      setQuery((prev) => prev.q === next ? prev : { q: next, limit: SEARCH_DEFAULT_LIMIT })
+    }, 200)
     return () => clearTimeout(t)
   }, [value])
+  const { q, limit } = query
   const active = q.length >= SEARCH_MIN && open
-  const results = useHomeSearch(q, active)
+  const results = useHomeSearch(q, active, limit)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -48,8 +60,9 @@ export default function HomeSearch() {
     }
   }, [])
 
-  const groups = GROUPS.map(([kind, label, key]) => ({ kind, label, items: (results.data?.[key] ?? []) as HomeSearchHit[] }))
-  const hasAny = groups.some((g) => g.items.length > 0)
+  const groups = (['devices', 'cabinets', 'rows', 'halls'] as const).map((key) => groupOf(results.data?.groups, key))
+  const hasAny = groups.some((g) => (g?.items.length ?? 0) > 0)
+  const parked = results.data?.parked ?? [PARKED.dcreq_search]
   const showPanel = open && value.trim().length > 0
 
   return (
@@ -71,27 +84,44 @@ export default function HomeSearch() {
           {active && results.isPending && <p className="hint">Searching…</p>}
           {active && results.error && <p className="error" role="alert">Couldn’t load search. <button type="button" className="link" onClick={() => void results.refetch()}>Retry</button></p>}
           {active && results.isSuccess && !hasAny && <p className="hint" role="status">No match.</p>}
-          {active && results.isSuccess && groups.map((g) => g.items.length > 0 && (
-            <div key={g.kind} className="home-search-group">
-              <h2>{g.label}</h2>
+          {active && results.isSuccess && groups.map((g) => g && g.items.length > 0 && (
+            <div key={g.key} className="home-search-group">
+              <h2>{GROUP_LABEL[g.key]}</h2>
               <ul>
-                {g.items.map((hit) => (
-                  <li key={`${hit.kind}-${hit.id}`}>
-                    <Link role="option" to={hit.href} onClick={() => setOpen(false)}>
-                      <span className="mono">{hit.label}</span>
-                      {hit.subtitle && <span className="hint">{hit.subtitle}</span>}
-                    </Link>
-                  </li>
-                ))}
+                {g.items.map((item) => {
+                  const href = searchHref(g.key, item)
+                  const subtitle = searchSubtitle(g.key, item)
+                  const body = (
+                    <>
+                      <span className="mono">{item.label}</span>
+                      {subtitle && <span className="hint">{subtitle}</span>}
+                    </>
+                  )
+                  return (
+                    <li key={`${g.key}-${item.id}`}>
+                      {href
+                        ? <Link role="option" to={href} onClick={() => setOpen(false)}>{body}</Link>
+                        : <span role="option" aria-disabled="true">{body}</span>}
+                    </li>
+                  )
+                })}
               </ul>
+              {g.truncated && limit < SEARCH_MAX_LIMIT && (
+                <button type="button" className="link home-search-show-all" onClick={() => setQuery((prev) => ({ ...prev, limit: SEARCH_MAX_LIMIT }))}>
+                  Show all {g.count}
+                </button>
+              )}
+              {g.truncated && limit >= SEARCH_MAX_LIMIT && (
+                <p className="hint">Showing {g.items.length} of {g.count}.</p>
+              )}
             </div>
           ))}
-          {active && results.isSuccess && results.data && (
-            <div className="home-search-group">
+          {active && results.isSuccess && parked.map((tile) => (
+            <div key={tile.key} className="home-search-group">
               <h2>DCREQs</h2>
-              <p className="hint" data-testid="dcreq-search-parked">Not available yet. {results.data.dcreqs.message}</p>
+              <p className="hint" data-testid="dcreq-search-parked">Not available yet. {tile.message}</p>
             </div>
-          )}
+          ))}
         </div>
       )}
     </div>

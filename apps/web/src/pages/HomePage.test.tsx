@@ -149,7 +149,44 @@ describe('quick search', () => {
     await user.clear(box)
     await user.type(box, 'Hall')
     expect(await within(await screen.findByRole('listbox')).findByRole('option', { name: /Hall 2/ })).toHaveAttribute('href', '/halls/1')
-    expect(screen.getByTestId('dcreq-search-parked')).toHaveTextContent('Not available yet')
+    expect(screen.getByTestId('dcreq-search-parked')).toHaveTextContent('Not available yet. DCREQ search is not available yet.')
+  })
+
+  it('hints instead of searching when the query is under 2 characters', async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<App />, '/')
+    const box = await screen.findByRole('searchbox', { name: 'Search device, cabinet, row or hall' })
+    await user.type(box, 'w')
+    expect(await screen.findByText('Type at least 2 characters.')).toBeInTheDocument()
+    expect(screen.queryByText('Searching…')).toBeNull()
+    expect(screen.queryByTestId('dcreq-search-parked')).toBeNull()
+  })
+
+  it('shows Show all N when a group is truncated and expands on click', async () => {
+    const user = userEvent.setup()
+    const db = seedHome('admin')
+    for (let i = 0; i < 6; i++) db.racks.push({ id: 100 + i, row_id: 1, name: `Cab-${i}`, u_height: 42 })
+    installMockApi(db)
+    renderWithProviders(<App />, '/')
+    const box = await screen.findByRole('searchbox', { name: 'Search device, cabinet, row or hall' })
+    await user.type(box, 'Cab')
+    const panel = await screen.findByRole('listbox', { name: 'Search results' })
+    expect(await within(panel).findByRole('button', { name: 'Show all 6' })).toBeInTheDocument()
+    expect(within(panel).getAllByRole('option').filter((el) => /Cab-/.test(el.textContent ?? ''))).toHaveLength(5)
+    await user.click(within(panel).getByRole('button', { name: 'Show all 6' }))
+    expect(await within(panel).findByRole('option', { name: /Cab-5/ })).toBeInTheDocument()
+    expect(within(panel).getAllByRole('option').filter((el) => /Cab-/.test(el.textContent ?? ''))).toHaveLength(6)
+    expect(within(panel).queryByRole('button', { name: 'Show all 6' })).toBeNull()
+  })
+
+  it('labels an unplaced device as No position', async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<App />, '/')
+    const box = await screen.findByRole('searchbox', { name: 'Search device, cabinet, row or hall' })
+    await user.type(box, 'spare-01')
+    const opt = await within(await screen.findByRole('listbox')).findByRole('option', { name: /spare-01/ })
+    expect(opt).toHaveAttribute('href', '/devices?q=spare-01')
+    expect(opt).toHaveTextContent('No position')
   })
 
   it('focuses the header search when / is pressed', async () => {

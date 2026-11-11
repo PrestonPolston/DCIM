@@ -1,7 +1,7 @@
 // Fixtures matching GET /home/summary (docs/API.md on feat/home-summary).
 import {
   PARKED, composeDeviceIssues, composeProfileHealth, parkedMyWork, profileDisplayName,
-  type HomeSearchResults, type HomeSummary, type ParkedTile, type ProfileHealth, type DeviceIssues,
+  type HomeSearch, type HomeSummary, type ParkedTile, type ProfileHealth, type DeviceIssues,
 } from './home'
 
 const NOW = Date.parse('2026-11-11T14:00:00Z')
@@ -64,12 +64,24 @@ export function fixtureSummary(opts: { includeAdmin?: boolean; now?: number } = 
   return summary
 }
 
-export const SEARCH_FIXTURES: HomeSearchResults = {
-  devices: [{ kind: 'device', id: 1, label: 'web-01', href: '/cabinets/12?device=1', subtitle: 'SN SN-A1' }],
-  cabinets: [{ kind: 'cabinet', id: 12, label: 'R12', href: '/cabinets/12' }],
-  rows: [{ kind: 'row', id: 1, label: 'Row 3', href: '/halls/1/rows/1' }],
-  halls: [{ kind: 'hall', id: 1, label: 'Hall 2', href: '/halls/1' }],
-  dcreqs: PARKED.dcreq_search,
+export const SEARCH_FIXTURES: HomeSearch = {
+  query: 'web',
+  generated_at: '2026-11-11T14:00:00Z',
+  groups: [
+    { key: 'devices', count: 1, truncated: false, items: [
+      { id: 1, label: 'web-01', hostname: 'web-01', serial: 'SN-A1', status: 'active', rack_id: 12, rack_name: 'R12', position_u: 20 },
+    ]},
+    { key: 'cabinets', count: 1, truncated: false, items: [
+      { id: 12, label: 'R12', name: 'R12', row_id: 1, row_name: 'Row 3', hall_id: 1, hall_name: 'Hall 2' },
+    ]},
+    { key: 'rows', count: 1, truncated: false, items: [
+      { id: 1, label: 'Row 3', name: 'Row 3', site_id: 1, site_name: 'Site A', hall_id: 1 },
+    ]},
+    { key: 'halls', count: 1, truncated: false, items: [
+      { id: 1, label: 'Hall 2', name: 'Hall 2', site_id: 1, site_name: 'Site A' },
+    ]},
+  ],
+  parked: [PARKED.dcreq_search],
 }
 
 export { PARKED, profileDisplayName }
