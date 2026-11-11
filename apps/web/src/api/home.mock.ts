@@ -1,12 +1,12 @@
-// Fixtures and an in-memory GET /home/summary for unit tests.
+// Fixtures matching GET /home/summary (docs/API.md on feat/home-summary).
 import {
-  PARKED_MESSAGES, composeDeviceIssues, composeProfileHealth, defaultParked,
+  PARKED, composeDeviceIssues, composeProfileHealth, parkedMyWork, profileDisplayName,
   type HomeSearchResults, type HomeSummary, type ParkedTile, type ProfileHealth, type DeviceIssues,
 } from './home'
 
 const NOW = Date.parse('2026-11-11T14:00:00Z')
 
-/** Sample GET /profiles rows, including the dates Backend is adding to the list. */
+/** Sample GET /profiles rows, including published_at / retired_at / updated_at (Z). */
 export const PROFILE_FIXTURES: Record<string, unknown>[] = [
   {
     id: 11, device_type_id: 1, name: 'Default', is_default: true, u_height: 1, is_full_depth: true,
@@ -38,13 +38,13 @@ export const PROFILE_FIXTURES: Record<string, unknown>[] = [
 ]
 
 export const UNPLACED_FIXTURES = [
-  { id: 21, hostname: 'r01c03-srv-09', status: 'install' },
-  { id: 22, hostname: 'gpu-spare-1', status: 'install' },
-  { id: 23, hostname: 'lab-fw-02', status: 'active' },
+  { id: 21, hostname: 'r01c03-srv-09', status: 'install', updated_at: '2026-11-10T14:00:00Z' },
+  { id: 22, hostname: 'gpu-spare-1', status: 'install', updated_at: '2026-11-10T13:00:00Z' },
+  { id: 23, hostname: 'lab-fw-02', status: 'active', updated_at: '2026-11-09T14:00:00Z' },
 ]
 
 export function fixtureProfileHealth(now = NOW): ProfileHealth {
-  return composeProfileHealth(PROFILE_FIXTURES, now)
+  return composeProfileHealth(PROFILE_FIXTURES as (Record<string, unknown> & { id: number; name: string })[], now)
 }
 
 export function fixtureDeviceIssues(): DeviceIssues {
@@ -54,12 +54,14 @@ export function fixtureDeviceIssues(): DeviceIssues {
 export function fixtureSummary(opts: { includeAdmin?: boolean; now?: number } = {}): HomeSummary {
   const includeAdmin = opts.includeAdmin ?? true
   const now = opts.now ?? NOW
-  return {
-    generated_at: new Date(now).toISOString(),
-    my_work: {},
-    admin: includeAdmin ? { profile_health: fixtureProfileHealth(now), device_issues: fixtureDeviceIssues() } : undefined,
-    parked: defaultParked(),
+  const summary: HomeSummary = {
+    generated_at: new Date(now).toISOString().replace(/\.\d{3}Z$/, 'Z'),
+    my_work: parkedMyWork(),
   }
+  if (includeAdmin) {
+    summary.admin = { profile_health: fixtureProfileHealth(now), device_issues: fixtureDeviceIssues(), workload: PARKED.workload }
+  }
+  return summary
 }
 
 export const SEARCH_FIXTURES: HomeSearchResults = {
@@ -67,46 +69,8 @@ export const SEARCH_FIXTURES: HomeSearchResults = {
   cabinets: [{ kind: 'cabinet', id: 12, label: 'R12', href: '/cabinets/12' }],
   rows: [{ kind: 'row', id: 1, label: 'Row 3', href: '/halls/1/rows/1' }],
   halls: [{ kind: 'hall', id: 1, label: 'Hall 2', href: '/halls/1' }],
-  dcreqs: { status: 'not_available', message: PARKED_MESSAGES.dcreq_search },
+  dcreqs: PARKED.dcreq_search,
 }
 
-export interface HomeMockState {
-  summary?: HomeSummary
-  search?: HomeSearchResults
-  profileError?: string
-  deviceError?: string
-  searchError?: string
-}
-
-let state: HomeMockState = {}
-
-export function resetHomeMock(patch: HomeMockState = {}) {
-  state = { summary: fixtureSummary(), search: SEARCH_FIXTURES, ...patch }
-}
-
-export function createMockHomeApi() {
-  return {
-    async summary(includeAdmin: boolean): Promise<HomeSummary> {
-      const s = state.summary ?? fixtureSummary({ includeAdmin })
-      const errors: Record<string, string> = { ...(s.errors ?? {}) }
-      if (state.profileError) errors.profile_health = state.profileError
-      if (state.deviceError) errors.device_issues = state.deviceError
-      return { ...s, admin: includeAdmin ? s.admin : undefined, errors: Object.keys(errors).length ? errors : s.errors, parked: s.parked ?? defaultParked() }
-    },
-    async profileHealth(): Promise<ProfileHealth> {
-      if (state.profileError) throw new Error(state.profileError)
-      return state.summary?.admin?.profile_health ?? fixtureProfileHealth()
-    },
-    async deviceIssues(): Promise<DeviceIssues> {
-      if (state.deviceError) throw new Error(state.deviceError)
-      return state.summary?.admin?.device_issues ?? fixtureDeviceIssues()
-    },
-    async search(q: string): Promise<HomeSearchResults> {
-      void q
-      if (state.searchError) throw new Error(state.searchError)
-      return state.search ?? SEARCH_FIXTURES
-    },
-  }
-}
-
+export { PARKED, profileDisplayName }
 export type { ParkedTile }

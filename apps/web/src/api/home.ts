@@ -1,15 +1,15 @@
-// Home-page adapter (docs/design/home.md).
-// GET /home/summary is not on 00137ad, so HOME_API.live defaults to false and we
-// compose from today's endpoints. The typed shapes match Backend's planned
-// contract (feat/home-summary): { generated_at, my_work, admin?, parked }.
+// Home-page adapter for GET /home/summary (docs/API.md on feat/home-summary).
+// HOME_API.live defaults to true; tests flip it off and compose the same shape
+// from GET /profiles and GET /devices. There is no GET /home/search yet, so
+// quick search fans out to /devices, /racks, /rows and /halls (DCREQ is parked).
 import { useQuery } from '@tanstack/react-query'
 import { ApiError, listPage, send } from './client'
 import { needsReview, toUiProfile, type ProfileListItem, type ProfileStatus } from './profiles'
 import type { Device, Hall, Rack, Row } from './types'
 
 export const HOME_API = {
-  /** true = GET /home/summary; false = compose from existing endpoints + parked tiles. */
-  live: false,
+  /** true = GET /home/summary; false = compose the same shape from existing list endpoints. */
+  live: true,
 }
 
 export const STALE_DRAFT_DAYS = 14
@@ -19,67 +19,78 @@ export const UNPOSITIONED_DEVICE_LIMIT = 10
 export const SEARCH_MIN = 2
 export const SEARCH_LIMIT = 8
 
-export interface ParkedTile { status: 'not_available'; message: string }
+export interface ParkedTile { key: string; status: 'not_available'; message: string }
 
-export interface ProfileHealthItem {
+export const PARKED = {
+  jobs: { key: 'jobs', status: 'not_available', message: 'Needs jobs/DCREQ logic.' } as ParkedTile,
+  dcreqs: { key: 'dcreqs', status: 'not_available', message: 'Needs jobs/DCREQ logic.' } as ParkedTile,
+  held_imports: { key: 'held_imports', status: 'not_available', message: 'Held ePIF import rows are not in the API yet.' } as ParkedTile,
+  workload: { key: 'workload', status: 'not_available', message: 'Needs jobs/DCREQ logic.' } as ParkedTile,
+  needs_power_assignment: { key: 'needs_power_assignment', status: 'not_available', message: 'Needs device_psu_assignments; devices.power_assignment is free text only.' } as ParkedTile,
+  port_conflicts: { key: 'port_conflicts', status: 'not_available', message: 'Port conflicts are refused at write time; there is no stored flag.' } as ParkedTile,
+  open_power_mismatches: { key: 'open_power_mismatches', status: 'not_available', message: 'The power_mismatches table and route are not built.' } as ParkedTile,
+  /** Client-only: there is no DCREQ q on the search endpoints yet. */
+  dcreq_search: { key: 'dcreq_search', status: 'not_available', message: 'Needs jobs/DCREQ logic.' } as ParkedTile,
+}
+
+export function parkedMyWork(): MyWork {
+  return { jobs: PARKED.jobs, dcreqs: PARKED.dcreqs, held_imports: PARKED.held_imports }
+}
+
+/** `"<manufacturer> <model> · <profile name>"` — the summary's `name` field. */
+export function profileDisplayName(manufacturer: string, model: string, name: string): string {
+  return `${manufacturer} ${model} · ${name}`
+}
+
+export function hrefForFilter(path: '/profiles' | '/devices', filter: string): string {
+  return `${path}?${filter}`
+}
+
+export interface NeedsReviewItem { id: number; name: string; usable_issue: string | null; usable_issues: string[] }
+export interface StaleDraftItem { id: number; name: string; updated_at: string }
+export interface RecentlyRetiredItem { id: number; name: string; retired_at: string }
+export interface RecentlyChangedItem {
   id: number
   name: string
   status: ProfileStatus
-  updated_at: string | null
+  updated_at: string
   published_at: string | null
   retired_at: string | null
-  manufacturer?: string
-  model?: string
-  variant?: string | null
-  device_count?: number | null
-  usable_issues?: string[]
 }
+export interface UnpositionedDevice { id: number; hostname: string; status: string; updated_at: string }
+
+export interface CappedList<T> { count: number; truncated: boolean; items: T[]; filter?: string }
+export interface NeedsReviewList extends CappedList<NeedsReviewItem> {
+  by_issue: { rear_image_missing: number; orientation_missing: number }
+  filter: string
+}
+export interface StaleDraftsList extends CappedList<StaleDraftItem> { filter: string }
+export interface RecentlyRetiredList extends CappedList<RecentlyRetiredItem> { filter: string }
+export type RecentlyChangedList = CappedList<RecentlyChangedItem>
+export interface UnpositionedList extends CappedList<UnpositionedDevice> { filter: string }
 
 export interface ProfileHealth {
-  counts: { draft: number; published: number; retired: number }
-  needs_review: number
-  stale_drafts: number
-  recently_retired: number
-  recently_changed: ProfileHealthItem[]
-  needs_review_items: ProfileHealthItem[]
-  stale_draft_items: ProfileHealthItem[]
-  recently_retired_items: ProfileHealthItem[]
-  /** False when list items have no updated_at / retired_at, so windows can't be applied. */
-  dates_available: boolean
+  key: 'profile_health'
+  by_status: { draft: number; published: number; retired: number }
+  needs_review: NeedsReviewList
+  stale_drafts: StaleDraftsList
+  recently_retired: RecentlyRetiredList
+  recently_changed: RecentlyChangedList
 }
-
-export interface UnpositionedDevice { id: number; hostname: string; status: string }
-export interface DeviceIssues { no_position: { count: number; items: UnpositionedDevice[] } }
-export interface HomeAdmin { profile_health: ProfileHealth; device_issues: DeviceIssues }
-/** Job / DCREQ / held-import counts are parked; nothing to compute today. */
-export type HomeMyWork = Record<string, never>
-
+export interface DeviceIssues {
+  key: 'device_issues'
+  no_position: UnpositionedList
+  needs_power_assignment: ParkedTile
+  port_conflicts: ParkedTile
+  open_power_mismatches: ParkedTile
+}
+export interface MyWork { jobs: ParkedTile; dcreqs: ParkedTile; held_imports: ParkedTile }
+export interface HomeAdmin { profile_health: ProfileHealth; device_issues: DeviceIssues; workload: ParkedTile }
 export interface HomeSummary {
   generated_at: string
-  my_work: HomeMyWork
-  /** Admins only; omitted for technician and read-only. */
+  my_work: MyWork
+  /** Present for admins only; omitted (not null) for technician and read-only. */
   admin?: HomeAdmin
-  parked: Record<string, ParkedTile>
-  /** Per-tile errors so one failure doesn't take down the page. */
-  errors?: Record<string, string>
-}
-
-export const PARKED_MESSAGES = {
-  overdue_jobs: 'Needs jobs/DCREQ logic (parked)',
-  current_jobs: 'Needs jobs/DCREQ logic (parked)',
-  recent_dcreqs: 'Needs jobs/DCREQ logic (parked)',
-  held_imports: 'Needs jobs/DCREQ logic (parked)',
-  workload: 'Needs jobs/DCREQ logic (parked)',
-  power_issues: 'Needs jobs/DCREQ logic (parked)',
-  dcreq_search: 'Needs jobs/DCREQ logic (parked)',
-} as const
-
-export type ParkedId = keyof typeof PARKED_MESSAGES
-
-export function defaultParked(): Record<string, ParkedTile> {
-  return Object.fromEntries(
-    (Object.entries(PARKED_MESSAGES) as [ParkedId, string][]).map(([k, message]) => [k, { status: 'not_available' as const, message }]),
-  )
 }
 
 export type SearchKind = 'device' | 'cabinet' | 'row' | 'hall'
@@ -93,9 +104,7 @@ export interface HomeSearchResults {
 }
 
 export interface HomeApi {
-  summary(includeAdmin: boolean): Promise<HomeSummary>
-  profileHealth(): Promise<ProfileHealth>
-  deviceIssues(): Promise<DeviceIssues>
+  summary(): Promise<HomeSummary>
   search(q: string): Promise<HomeSearchResults>
 }
 
@@ -103,7 +112,7 @@ export function errMessage(e: unknown): string {
   return e instanceof Error ? e.message : 'Something went wrong'
 }
 
-/** Treat offset-less timestamps as UTC (same rule as other profile dates). */
+/** Treat offset-less timestamps as UTC; keep offset-bearing values as given. */
 export function parseApiDate(iso: string | null | undefined): Date | null {
   if (!iso) return null
   const s = iso.trim()
@@ -124,73 +133,82 @@ export function daysLabel(days: number): string {
   return n === 1 ? '1 day ago' : `${n} days ago`
 }
 
-function itemFromProfile(r: Record<string, unknown>): ProfileHealthItem {
+function cap<T>(items: T[], limit: number): { count: number; truncated: boolean; items: T[] } {
+  return { count: items.length, truncated: items.length > limit, items: items.slice(0, limit) }
+}
+
+type RawProfile = Record<string, unknown> & { id: number; name: string }
+
+function displayOf(r: RawProfile): string {
   const p = toUiProfile(r as unknown as ProfileListItem)
-  const status: ProfileStatus = r.status === 'draft' || r.status === 'published' || r.status === 'retired' ? r.status : 'published'
+  return profileDisplayName(p.manufacturer, p.model, p.name)
+}
+
+export function composeProfileHealth(rows: RawProfile[], now = Date.now()): ProfileHealth {
+  const published = rows.filter((r) => r.status === 'published')
+  const drafts = rows.filter((r) => r.status === 'draft')
+  const retired = rows.filter((r) => r.status === 'retired')
+
+  const reviewSrc = published.map((r) => {
+      const u = toUiProfile(r as unknown as ProfileListItem)
+      return { r, name: displayOf(r), issues: u.usableIssues, usable: u.usable }
+    }).filter((x) => needsReview({ status: 'published', usable: x.usable }))
+  reviewSrc.sort((a, b) => b.issues.length - a.issues.length || a.issues.join().localeCompare(b.issues.join()) || a.r.id - b.r.id)
+  const by_issue = {
+    rear_image_missing: reviewSrc.filter((x) => x.issues.includes('rear_image_missing')).length,
+    orientation_missing: reviewSrc.filter((x) => x.issues.includes('orientation_missing')).length,
+  }
+  const reviewItems: NeedsReviewItem[] = reviewSrc.map((x) => ({
+    id: x.r.id, name: x.name, usable_issue: x.issues[0] ?? null, usable_issues: x.issues,
+  }))
+
+  const staleSrc = drafts.map((r) => ({ r, days: daysSince(typeof r.updated_at === 'string' ? r.updated_at : null, now), at: typeof r.updated_at === 'string' ? r.updated_at : null }))
+    .filter((x): x is { r: RawProfile; days: number; at: string } => x.at != null && x.days != null && x.days >= STALE_DRAFT_DAYS)
+    .sort((a, b) => a.at.localeCompare(b.at) || a.r.id - b.r.id)
+  const retiredSrc = retired.map((r) => ({ r, days: daysSince(typeof r.retired_at === 'string' ? r.retired_at : null, now), at: typeof r.retired_at === 'string' ? r.retired_at : null }))
+    .filter((x): x is { r: RawProfile; days: number; at: string } => x.at != null && x.days != null && x.days <= RECENTLY_RETIRED_DAYS)
+    .sort((a, b) => b.at.localeCompare(a.at) || a.r.id - b.r.id)
+  const changedSrc = rows.map((r) => ({ r, at: typeof r.updated_at === 'string' ? r.updated_at : null }))
+    .filter((x): x is { r: RawProfile; at: string } => x.at != null)
+    .sort((a, b) => b.at.localeCompare(a.at) || a.r.id - b.r.id)
+
   return {
-    id: p.id,
-    name: [p.manufacturer, p.model].filter(Boolean).join(' ') || p.name,
-    status,
-    updated_at: typeof r.updated_at === 'string' ? r.updated_at : null,
-    published_at: typeof r.published_at === 'string' ? r.published_at : null,
-    retired_at: typeof r.retired_at === 'string' ? r.retired_at : null,
-    manufacturer: p.manufacturer,
-    model: p.model,
-    variant: p.isDefault ? null : p.name,
-    device_count: p.deviceCount,
-    usable_issues: p.usableIssues,
+    key: 'profile_health',
+    by_status: { draft: drafts.length, published: published.length, retired: retired.length },
+    needs_review: { ...cap(reviewItems, HOME_LIST_LIMIT), by_issue, filter: 'status=published&usable=false' },
+    stale_drafts: { ...cap(staleSrc.map((x) => ({ id: x.r.id, name: displayOf(x.r), updated_at: x.at })), HOME_LIST_LIMIT), filter: 'status=draft' },
+    recently_retired: { ...cap(retiredSrc.map((x) => ({ id: x.r.id, name: displayOf(x.r), retired_at: x.at })), HOME_LIST_LIMIT), filter: 'status=retired' },
+    recently_changed: { ...cap(changedSrc.map((x) => {
+      const status: ProfileStatus = x.r.status === 'draft' || x.r.status === 'published' || x.r.status === 'retired' ? x.r.status : 'published'
+      return {
+        id: x.r.id, name: displayOf(x.r), status,
+        updated_at: x.at,
+        published_at: typeof x.r.published_at === 'string' ? x.r.published_at : null,
+        retired_at: typeof x.r.retired_at === 'string' ? x.r.retired_at : null,
+      }
+    }), HOME_LIST_LIMIT), count: rows.length, truncated: rows.length > HOME_LIST_LIMIT },
   }
 }
 
-export function composeProfileHealth(rows: Record<string, unknown>[], now = Date.now()): ProfileHealth {
-  const items = rows.map(itemFromProfile)
-  const dates_available = rows.some((r) => typeof r.updated_at === 'string' || typeof r.retired_at === 'string')
-  const drafts = items.filter((p) => p.status === 'draft')
-  const published = items.filter((p) => p.status === 'published')
-  const retired = items.filter((p) => p.status === 'retired')
-  const reviewItems = items.filter((p) => needsReview({ status: p.status, usable: (p.usable_issues ?? []).length === 0 }))
-  const staleItems = dates_available
-    ? drafts.filter((p) => {
-        const d = daysSince(p.updated_at, now)
-        return d != null && d >= STALE_DRAFT_DAYS
-      })
-    : []
-  const recentRetiredItems = dates_available
-    ? retired.filter((p) => {
-        const d = daysSince(p.retired_at, now)
-        return d != null && d <= RECENTLY_RETIRED_DAYS
-      })
-    : []
-  const changed = [...items].filter((p) => p.updated_at).sort((a, b) => {
-    const da = parseApiDate(a.updated_at)?.getTime() ?? 0
-    const db = parseApiDate(b.updated_at)?.getTime() ?? 0
-    return db - da
-  })
-  const cap = (xs: ProfileHealthItem[]) => xs.slice(0, HOME_LIST_LIMIT)
-  return {
-    counts: { draft: drafts.length, published: published.length, retired: retired.length },
-    needs_review: reviewItems.length,
-    stale_drafts: staleItems.length,
-    recently_retired: recentRetiredItems.length,
-    recently_changed: cap(changed),
-    needs_review_items: cap(reviewItems),
-    stale_draft_items: cap(staleItems),
-    recently_retired_items: cap(recentRetiredItems),
-    dates_available,
-  }
-}
-
-export function composeDeviceIssues(items: { id: number; host_name?: string; hostname?: string; status: string }[], total?: number): DeviceIssues {
+export function composeDeviceIssues(items: { id: number; host_name?: string; hostname?: string; status: string; updated_at?: string | null }[], total?: number): DeviceIssues {
   const mapped: UnpositionedDevice[] = items.slice(0, UNPOSITIONED_DEVICE_LIMIT).map((d) => ({
     id: d.id,
     hostname: d.hostname ?? d.host_name ?? `#${d.id}`,
     status: d.status,
+    updated_at: d.updated_at ?? '',
   }))
-  return { no_position: { count: total ?? items.length, items: mapped } }
+  const count = total ?? items.length
+  return {
+    key: 'device_issues',
+    no_position: { count, truncated: count > UNPOSITIONED_DEVICE_LIMIT, items: mapped, filter: 'status=install&status=active&unplaced=true' },
+    needs_power_assignment: PARKED.needs_power_assignment,
+    port_conflicts: PARKED.port_conflicts,
+    open_power_mismatches: PARKED.open_power_mismatches,
+  }
 }
 
-async function listProfilesByStatus(status: ProfileStatus): Promise<{ items: Record<string, unknown>[]; total: number }> {
-  const page = await listPage<Record<string, unknown>>('/profiles', { status, limit: 500 })
+async function listProfilesByStatus(status: ProfileStatus): Promise<{ items: RawProfile[]; total: number }> {
+  const page = await listPage<RawProfile>('/profiles', { status, limit: 500 })
   return { items: page.items, total: page.total }
 }
 
@@ -201,7 +219,7 @@ export async function composeProfileHealthFromApi(now = Date.now()): Promise<Pro
     listProfilesByStatus('retired'),
   ])
   const health = composeProfileHealth([...pub.items, ...draft.items, ...retired.items], now)
-  return { ...health, counts: { draft: draft.total, published: pub.total, retired: retired.total } }
+  return { ...health, by_status: { draft: draft.total, published: pub.total, retired: retired.total } }
 }
 
 export async function composeDeviceIssuesFromApi(): Promise<DeviceIssues> {
@@ -211,95 +229,37 @@ export async function composeDeviceIssuesFromApi(): Promise<DeviceIssues> {
   return composeDeviceIssues(items, header !== null ? Number(header) : items.length)
 }
 
-function emptySummary(): HomeSummary {
-  return { generated_at: new Date().toISOString(), my_work: {}, parked: defaultParked() }
-}
-
-function normaliseSummary(raw: HomeSummary): HomeSummary {
-  return {
-    generated_at: raw.generated_at,
-    my_work: raw.my_work ?? {},
-    admin: raw.admin,
-    parked: { ...defaultParked(), ...(raw.parked ?? {}) },
-    errors: raw.errors,
-  }
-}
-
-let inflight: { at: number; p: Promise<HomeSummary> } | null = null
-async function fetchLiveSummary(): Promise<HomeSummary> {
-  const now = Date.now()
-  if (!inflight || now - inflight.at > 2_000) {
-    inflight = { at: now, p: send('/home/summary').then(async (res) => {
-      if (!res.ok) throw new ApiError(res.status, `${res.status} ${res.statusText}`)
-      return normaliseSummary((await res.json()) as HomeSummary)
-    }) }
-  }
-  return inflight.p
-}
-
 export async function composeSummary(includeAdmin: boolean, now = Date.now()): Promise<HomeSummary> {
-  const out = emptySummary()
-  out.generated_at = new Date(now).toISOString()
+  const out: HomeSummary = { generated_at: new Date(now).toISOString().replace(/\.\d{3}Z$/, 'Z'), my_work: parkedMyWork() }
   if (!includeAdmin) return out
   const [p, d] = await Promise.allSettled([composeProfileHealthFromApi(now), composeDeviceIssuesFromApi()])
-  out.admin = { profile_health: p.status === 'fulfilled' ? p.value : composeProfileHealth([]), device_issues: d.status === 'fulfilled' ? d.value : composeDeviceIssues([]) }
-  const errors: Record<string, string> = {}
-  if (p.status === 'rejected') errors.profile_health = errMessage(p.reason)
-  if (d.status === 'rejected') errors.device_issues = errMessage(d.reason)
-  if (Object.keys(errors).length) out.errors = errors
+  if (p.status === 'rejected') throw p.reason
+  out.admin = {
+    profile_health: p.value,
+    device_issues: d.status === 'fulfilled' ? d.value : composeDeviceIssues([]),
+    workload: PARKED.workload,
+  }
+  if (d.status === 'rejected') throw d.reason
   return out
 }
 
-function liveApi(): HomeApi {
+function normalise(raw: HomeSummary): HomeSummary {
   return {
-    async summary(includeAdmin) {
-      try {
-        const s = await fetchLiveSummary()
-        if (!includeAdmin) return { ...s, admin: undefined }
-        return s
-      } catch (e) {
-        if (e instanceof ApiError && (e.status === 404 || e.status === 501)) return composeSummary(includeAdmin)
-        throw e
-      }
-    },
-    async profileHealth() {
-      try {
-        const s = await fetchLiveSummary()
-        if (s.errors?.profile_health) throw new Error(s.errors.profile_health)
-        if (s.admin?.profile_health) return s.admin.profile_health
-      } catch (e) {
-        if (!(e instanceof ApiError) || (e.status !== 404 && e.status !== 501)) throw e
-      }
-      return composeProfileHealthFromApi()
-    },
-    async deviceIssues() {
-      try {
-        const s = await fetchLiveSummary()
-        if (s.errors?.device_issues) throw new Error(s.errors.device_issues)
-        if (s.admin?.device_issues) return s.admin.device_issues
-      } catch (e) {
-        if (!(e instanceof ApiError) || (e.status !== 404 && e.status !== 501)) throw e
-      }
-      return composeDeviceIssuesFromApi()
-    },
-    async search(q) {
-      try {
-        const res = await send(`/home/search?q=${encodeURIComponent(q)}`)
-        if (res.ok) return (await res.json()) as HomeSearchResults
-        if (res.status !== 404 && res.status !== 501) throw new ApiError(res.status, `${res.status} ${res.statusText}`)
-      } catch (e) {
-        if (!(e instanceof ApiError) || (e.status !== 404 && e.status !== 501)) throw e
-      }
-      return composeSearch(q)
-    },
+    generated_at: raw.generated_at,
+    my_work: { ...parkedMyWork(), ...raw.my_work },
+    ...(raw.admin ? { admin: raw.admin } : {}),
   }
+}
+
+export async function fetchSummary(): Promise<HomeSummary> {
+  const res = await send('/home/summary')
+  return normalise((await res.json()) as HomeSummary)
 }
 
 export async function composeSearch(q: string): Promise<HomeSearchResults> {
   const term = q.trim()
-  if (term.length < SEARCH_MIN) {
-    return { devices: [], cabinets: [], rows: [], halls: [], dcreqs: { status: 'not_available', message: PARKED_MESSAGES.dcreq_search } }
-  }
+  const empty: HomeSearchResults = { devices: [], cabinets: [], rows: [], halls: [], dcreqs: PARKED.dcreq_search }
+  if (term.length < SEARCH_MIN) return empty
   const [devices, cabinets, rows, halls] = await Promise.all([
     listPage<Device>('/devices', { q: term, limit: SEARCH_LIMIT }),
     listPage<Rack>('/racks', { q: term, limit: SEARCH_LIMIT }),
@@ -308,59 +268,46 @@ export async function composeSearch(q: string): Promise<HomeSearchResults> {
   ])
   return {
     devices: devices.items.map((d) => ({
-      kind: 'device' as const,
-      id: d.id,
-      label: d.host_name,
+      kind: 'device' as const, id: d.id, label: d.host_name,
       href: d.rack_id ? `/cabinets/${d.rack_id}?device=${d.id}` : `/devices?q=${encodeURIComponent(d.host_name)}`,
       subtitle: d.serial_number ? `SN ${d.serial_number}` : d.status,
     })),
     cabinets: cabinets.items.map((r) => ({
-      kind: 'cabinet' as const,
-      id: r.id,
-      label: r.name,
+      kind: 'cabinet' as const, id: r.id, label: r.name,
       href: r.hall_id ? `/halls/${r.hall_id}/cabinets/${r.id}` : `/cabinets/${r.id}`,
     })),
-    rows: rows.items.map((r) => ({
-      kind: 'row' as const,
-      id: r.id,
-      label: r.name,
-      href: `/halls/${r.hall_id}/rows/${r.id}`,
-    })),
-    halls: halls.items.map((h) => ({
-      kind: 'hall' as const,
-      id: h.id,
-      label: h.name,
-      href: `/halls/${h.id}`,
-    })),
-    dcreqs: { status: 'not_available', message: PARKED_MESSAGES.dcreq_search },
+    rows: rows.items.map((r) => ({ kind: 'row' as const, id: r.id, label: r.name, href: `/halls/${r.hall_id}/rows/${r.id}` })),
+    halls: halls.items.map((h) => ({ kind: 'hall' as const, id: h.id, label: h.name, href: `/halls/${h.id}` })),
+    dcreqs: PARKED.dcreq_search,
   }
 }
 
 export function homeApi(): HomeApi {
-  return HOME_API.live ? liveApi() : {
-    summary: (includeAdmin) => composeSummary(includeAdmin),
-    profileHealth: () => composeProfileHealthFromApi(),
-    deviceIssues: () => composeDeviceIssuesFromApi(),
-    search: (q) => composeSearch(q),
-  }
+  return HOME_API.live
+    ? {
+        async summary() {
+          try { return await fetchSummary() }
+          catch (e) {
+            if (e instanceof ApiError && (e.status === 404 || e.status === 501)) return composeSummary(true)
+            throw e
+          }
+        },
+        search: (q) => composeSearch(q),
+      }
+    : {
+        summary: () => composeSummary(true),
+        search: (q) => composeSearch(q),
+      }
 }
 
 export const homeKeys = {
   all: ['home'] as const,
-  summary: (includeAdmin: boolean) => ['home', 'summary', includeAdmin] as const,
-  profileHealth: ['home', 'profile-health'] as const,
-  deviceIssues: ['home', 'device-issues'] as const,
+  summary: ['home', 'summary'] as const,
   search: (q: string) => ['home', 'search', q] as const,
 }
 
-export function useHomeSummary(includeAdmin: boolean) {
-  return useQuery({ queryKey: homeKeys.summary(includeAdmin), queryFn: () => homeApi().summary(includeAdmin), retry: false })
-}
-export function useProfileHealth(enabled: boolean) {
-  return useQuery({ queryKey: homeKeys.profileHealth, queryFn: () => homeApi().profileHealth(), enabled, retry: false })
-}
-export function useDeviceIssues(enabled: boolean) {
-  return useQuery({ queryKey: homeKeys.deviceIssues, queryFn: () => homeApi().deviceIssues(), enabled, retry: false })
+export function useHomeSummary() {
+  return useQuery({ queryKey: homeKeys.summary, queryFn: () => homeApi().summary(), retry: false })
 }
 export function useHomeSearch(q: string, enabled: boolean) {
   return useQuery({ queryKey: homeKeys.search(q), queryFn: () => homeApi().search(q), enabled: enabled && q.trim().length >= SEARCH_MIN, retry: false })
