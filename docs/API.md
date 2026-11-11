@@ -249,7 +249,7 @@ Matching:
 
 - **devices**: current `host_name` (returned as `hostname` / `label`), `serial_number` (vendor serial or asset tag, returned as `serial`), and previous host names in name history. Soft-deleted devices are omitted. `rack_id`, `rack_name` and `position_u` are null when the device is unplaced.
 - **cabinets**: live rack name. Each hit includes the parent row and hall (`row_id` / `row_name`, `hall_id` / `hall_name`).
-- **rows**: row name, plus `site_id` / `site_name`.
+- **rows**: row name, plus the parent hall (`hall_id` / `hall_name`) and `site_id` / `site_name`. The Frontend row route is `/halls/:hallId/rows/:id`.
 - **halls**: hall name, plus `site_id` / `site_name`.
 
 DCREQ search is parked as `{key, status: "not_available", message}` with no numeric data. All four groups are always present, even when empty. `count` is the full number of matches in that group; `truncated` is true when `count` is greater than the number of `items` returned. `generated_at` is a UTC instant with a trailing Z.
@@ -303,6 +303,8 @@ Example (`GET /home/search?q=r01&limit=5`):
           "id": 2,
           "label": "Row 1",
           "name": "Row 1",
+          "hall_id": 1,
+          "hall_name": "Hall A",
           "site_id": 1,
           "site_name": "Default"
         }

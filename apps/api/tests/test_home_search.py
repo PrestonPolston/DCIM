@@ -6,7 +6,8 @@ from app.modules.home.constants import SEARCH_DEFAULT_LIMIT, SEARCH_MAX_LIMIT, S
 ISO_Z = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$")
 DEVICE_KEYS = {"id", "label", "hostname", "serial", "status", "rack_id", "rack_name", "position_u"}
 CABINET_KEYS = {"id", "label", "name", "row_id", "row_name", "hall_id", "hall_name"}
-PLACE_KEYS = {"id", "label", "name", "site_id", "site_name"}
+ROW_KEYS = {"id", "label", "name", "hall_id", "hall_name", "site_id", "site_name"}
+HALL_KEYS = {"id", "label", "name", "site_id", "site_name"}
 GROUP_ORDER = ("devices", "cabinets", "rows", "halls")
 
 
@@ -118,10 +119,12 @@ def test_search_matches_name_and_serial_case_insensitive(client):
     halls = _group(places, "halls")
     rows = _group(places, "rows")
     assert any(i["id"] == hall["id"] and i["name"] == "Hall Zulu" and i["label"] == "Hall Zulu"
-               and i["site_id"] == site["id"] and i["site_name"] == "MatchSite" and set(i) == PLACE_KEYS
+               and i["site_id"] == site["id"] and i["site_name"] == "MatchSite" and set(i) == HALL_KEYS
                for i in halls["items"])
-    assert any(i["id"] == row["id"] and i["name"] == "Row Zulu" and i["site_name"] == "MatchSite"
-               and set(i) == PLACE_KEYS for i in rows["items"])
+    assert any(i["id"] == row["id"] and i["name"] == "Row Zulu" and i["label"] == "Row Zulu"
+               and i["hall_id"] == hall["id"] and i["hall_name"] == "Hall Zulu"
+               and i["site_id"] == site["id"] and i["site_name"] == "MatchSite"
+               and set(i) == ROW_KEYS for i in rows["items"])
 
     cabs = client.get("/home/search", params={"q": "r99"}).json()
     cab = next(i for i in _group(cabs, "cabinets")["items"] if i["id"] == rack["id"])

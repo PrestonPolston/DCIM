@@ -150,8 +150,18 @@ class SearchCabinetItem(BaseModel):
     hall_name: str
 
 
+class SearchRowItem(BaseModel):
+    id: int
+    label: str
+    name: str
+    hall_id: int
+    hall_name: str
+    site_id: int
+    site_name: str
+
+
 class SearchPlaceItem(BaseModel):
-    """A row or hall hit, with the site it belongs to."""
+    """A hall hit, with the site it belongs to."""
     id: int
     label: str
     name: str
@@ -177,7 +187,7 @@ class RowSearchGroup(BaseModel):
     key: Literal["rows"] = "rows"
     count: int
     truncated: bool
-    items: list[SearchPlaceItem]
+    items: list[SearchRowItem]
 
 
 class HallSearchGroup(BaseModel):

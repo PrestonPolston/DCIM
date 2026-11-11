@@ -17,6 +17,7 @@ from app.modules.home.schemas import (
     SearchCabinetItem,
     SearchDeviceItem,
     SearchPlaceItem,
+    SearchRowItem,
 )
 from app.modules.locations.models import HallRow, RackRow, RackRowRow, SiteRow
 from app.pagination import contains
@@ -101,7 +102,7 @@ def _rows(session: Session, q: str, limit: int) -> RowSearchGroup:
     base = select(RackRowRow.id).where(contains(RackRowRow.name, q))
     count = _count(session, base)
     rows = session.exec(
-        select(RackRowRow, SiteRow.id, SiteRow.name)
+        select(RackRowRow, HallRow.id, HallRow.name, SiteRow.id, SiteRow.name)
         .join(HallRow, HallRow.id == RackRowRow.hall_id)
         .join(SiteRow, SiteRow.id == HallRow.site_id)
         .where(contains(RackRowRow.name, q))
@@ -109,14 +110,16 @@ def _rows(session: Session, q: str, limit: int) -> RowSearchGroup:
         .limit(limit)
     ).all()
     items = [
-        SearchPlaceItem(
+        SearchRowItem(
             id=row.id,
             label=row.name,
             name=row.name,
+            hall_id=hall_id,
+            hall_name=hall_name,
             site_id=site_id,
             site_name=site_name,
         )
-        for row, site_id, site_name in rows
+        for row, hall_id, hall_name, site_id, site_name in rows
     ]
     return RowSearchGroup(count=count, truncated=count > limit, items=items)
 

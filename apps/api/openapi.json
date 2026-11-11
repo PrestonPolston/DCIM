@@ -14711,7 +14711,7 @@
           },
           "items": {
             "items": {
-              "$ref": "#/components/schemas/SearchPlaceItem"
+              "$ref": "#/components/schemas/SearchRowItem"
             },
             "type": "array",
             "title": "Items"
@@ -14942,7 +14942,50 @@
           "site_name"
         ],
         "title": "SearchPlaceItem",
-        "description": "A row or hall hit, with the site it belongs to."
+        "description": "A hall hit, with the site it belongs to."
+      },
+      "SearchRowItem": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "hall_id": {
+            "type": "integer",
+            "title": "Hall Id"
+          },
+          "hall_name": {
+            "type": "string",
+            "title": "Hall Name"
+          },
+          "site_id": {
+            "type": "integer",
+            "title": "Site Id"
+          },
+          "site_name": {
+            "type": "string",
+            "title": "Site Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "name",
+          "hall_id",
+          "hall_name",
+          "site_id",
+          "site_name"
+        ],
+        "title": "SearchRowItem"
       },
       "Site": {
         "properties": {
