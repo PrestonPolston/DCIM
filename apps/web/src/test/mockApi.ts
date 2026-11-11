@@ -109,12 +109,14 @@ export function installMockApi(db: Db, override?: Handler) {
         return { manufacturer: t.manufacturer, model: t.name, asset_type: null, effective_asset_type: null, front_image: null,
           device_count: db.devices.filter((d) => d.profile_id === p.id || (p.is_default && d.device_type_id === t.id && d.profile_id == null)).length, ...p }
       })
-      const st = url.searchParams.get('status')
+      const st = url.searchParams.getAll('status')
       const q = url.searchParams.get('q')?.toLowerCase()
       const at = url.searchParams.get('asset_type')
-      if (st) items = items.filter((p) => p.status === st)
+      const usable = url.searchParams.get('usable')
+      if (st.length) items = items.filter((p) => st.includes(String(p.status)))
       if (q) items = items.filter((p) => [p.manufacturer, p.model, p.name].some((x) => x.toLowerCase().includes(q)))
       if (at) items = items.filter((p) => (p.effective_asset_type ?? p.asset_type) === at)
+      if (usable === 'true' || usable === 'false') items = items.filter((p) => String((p as { usable?: boolean }).usable ?? p.status === 'published') === usable)
       const lim = Number(url.searchParams.get('limit') ?? 50)
       return json(items.slice(0, lim), 200, { 'X-Total-Count': String(items.length) })
     }
@@ -150,8 +152,10 @@ export function installMockApi(db: Db, override?: Handler) {
     if (!table) return json({ detail: 'Not Found' }, 404)
     if (method === 'GET' && !idStr) {
       let items = table as unknown as Record<string, unknown>[]
+      const statuses = url.searchParams.getAll('status')
+      if (statuses.length) items = items.filter((i) => statuses.includes(String(i.status)))
       for (const [k, v] of url.searchParams) {
-        if (k === 'limit' || k === 'offset') continue
+        if (k === 'limit' || k === 'offset' || k === 'status') continue
         if (k === 'unplaced') items = items.filter((i) => (v === 'true') === (i.rack_id == null))
         else if (k === 'q') items = items.filter((i) => [i.host_name, i.serial_number, i.name].some((x) => String(x ?? '').toLowerCase().includes(v.toLowerCase())))
         else items = items.filter((i) => String(i[k]) === v)
