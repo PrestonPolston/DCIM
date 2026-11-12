@@ -576,7 +576,9 @@ function liveApi(): JobIntakeApi {
     createJob: (dcreq, fields) => request<Job>('/jobs', {
       method: 'POST',
       body: JSON.stringify({
-        dcreq,
+        // Valid short or full forms become DCREQ000NNNN; anything else (e.g. =1234) is sent as typed
+        // so formula_prefix / invalid_text still reach the API. Name and description stay as typed.
+        dcreq: isValidDcreq(dcreq) ? normalizeDcreq(dcreq) : dcreq,
         ...(fields?.name != null && fields.name !== '' ? { name: fields.name } : {}),
         ...(fields?.description != null && fields.description !== '' ? { description: fields.description } : {}),
       }),
