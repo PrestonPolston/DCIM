@@ -75,10 +75,10 @@ def test_csv_never_creates_a_job(client, engine):
     assert count(engine, ProjectRow) == 0 and count(engine, JobImportRow) == 0
 
 
-def test_cable_matrix_kind_not_available_yet(client):
+def test_epif_file_as_cable_matrix_is_a_header_error(client):
     j = _job(client)
     r = upload(client, j["id"], body(row(10001, "h1", 1)), kind="cable_matrix")
-    assert r.status_code == 422 and r.json()["detail"]["code"] == "import_kind_not_available"
+    assert r.status_code == 422 and r.json()["detail"]["code"] == "unknown_columns"
 
 
 # ---- staging / preview ----
