@@ -8,7 +8,7 @@ interface ImportMetaEnv {
   readonly VITE_JOB_INTAKE_ITEM_WRITES?: string
   /** Set to 'false' to disable ePIF import against a live API that has the routes. */
   readonly VITE_JOB_INTAKE_IMPORTS?: string
-  /** Set to 'true' when Backend ships cable-matrix import. */
+  /** Set to 'false' to disable cable-matrix import against a live API that has the routes. */
   readonly VITE_JOB_INTAKE_CABLE_IMPORTS?: string
 }
 

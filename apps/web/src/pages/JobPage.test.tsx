@@ -129,4 +129,27 @@ describe('job detail', () => {
     expect(note?.textContent).toBe('Held over.\nCheck PDU 2.')
     expect(note).toHaveClass('job-item-note')
   })
+
+
+  it('shows cable label and trail on cable-matrix queue items', async () => {
+    const job = seedMockJob({ dcreq: 'DCREQ0006666', name: 'Cables', connection_count: 1 })
+    seedMockOpenItem({
+      job_id: job.id,
+      item_type: 'unresolved_hop',
+      hostname: 'sw1',
+      cable_label: 'CAB-6',
+      cable_trail: 'T-1',
+      target_field: 'hop_1',
+      filename: 'cables.csv',
+      source: 'cable_matrix',
+      import_row_id: 1,
+    })
+    renderWithProviders(<App />, '/jobs/DCREQ0006666')
+    const hops = await screen.findByRole('region', { name: 'Unresolved hop' })
+    expect(hops).toHaveTextContent('sw1')
+    expect(hops).toHaveTextContent('CAB-6')
+    expect(hops).toHaveTextContent('T-1')
+    expect(hops).toHaveTextContent('hop 1')
+    expect(screen.getByTestId('job-queue-summary').textContent).toMatch(/1 connection/)
+  })
 })

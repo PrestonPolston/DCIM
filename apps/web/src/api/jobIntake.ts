@@ -1,8 +1,9 @@
 // Job intake v1 adapter (docs/design/job-intake.md, docs/db/JOB_INTAKE.md).
-// Built API (Backend feat/job-intake-api @ 66b3370, slices 1–2): POST/GET /jobs,
-// close/reopen, open-items read + defer/undefer/dismiss/resolve, ePIF
-// POST /imports (raw text/csv), GET import detail (the preview), commit.
-// No GET /preview, no /fill, no cable-matrix import, no DELETE abandon yet.
+// Built API (Backend feat/job-intake-api @ c1ed7db, slices 1–3): POST/GET /jobs,
+// close/reopen, open-items read + defer/undefer/dismiss/resolve, ePIF and
+// cable-matrix POST /imports (raw text/csv, kind=epif|cable_matrix), GET import
+// detail (the preview), commit. No /fill, no DELETE abandon yet. /connections
+// does not expose hops, IP config or status; this client does not read those.
 import { ApiError, API_BASE_URL, getCsrfToken, listPage, request } from './client'
 import { errorDetail, friendlyMessage, type ExistingJobRef } from './errors'
 import { parseApiDate } from '../lib/apiDate'
@@ -15,8 +16,8 @@ export const JOB_INTAKE_API = {
   openItemWrites: import.meta.env.VITE_JOB_INTAKE_ITEM_WRITES !== 'false',
   /** true = ePIF POST /imports and commit (slice 2). Set to 'false' to disable. */
   imports: import.meta.env.VITE_JOB_INTAKE_IMPORTS !== 'false',
-  /** Cable-matrix import is slice 3 and not shipped yet. */
-  cableImports: import.meta.env.VITE_JOB_INTAKE_CABLE_IMPORTS === 'true',
+  /** true = cable-matrix POST /imports (slice 3). Set to 'false' to disable. */
+  cableImports: import.meta.env.VITE_JOB_INTAKE_CABLE_IMPORTS !== 'false',
 }
 
 /** Live API is on, but open-item write routes are not shipped yet. */
@@ -29,7 +30,7 @@ export function jobImportsAvailable(): boolean {
   return !JOB_INTAKE_API.live || JOB_INTAKE_API.imports
 }
 
-/** Cable-matrix CSV import is not in slice 2. */
+/** Live API is on, but cable-matrix import is disabled. */
 export function jobCableImportsAvailable(): boolean {
   return !JOB_INTAKE_API.live || JOB_INTAKE_API.cableImports
 }
@@ -99,7 +100,7 @@ export interface Job {
   unresolved_count: number
   deferred_count: number
   device_count: number
-  /** Not in the committed /jobs contract; later slices may add it. */
+  /** Non-removed connections whose cable has project_id = this job (slice 3). */
   connection_count?: number
   /** Detail only (GET /jobs/{key} and POST /jobs). */
   unresolved_by_type?: Record<string, number>
@@ -144,6 +145,14 @@ export interface ImportRow {
   epif_id?: string | null
   rack?: string | null
   ru?: string | null
+  /** Cable-matrix row fields (slice 3). */
+  matrix_id?: string | null
+  a?: string | null
+  z?: string | null
+  trail?: string | null
+  cable_label?: string | null
+  connection_id?: number | null
+  cable_id?: number | null
 }
 
 export interface ImportCounts {
@@ -190,6 +199,9 @@ export interface JobOpenItem {
   filename: string | null
   hostname: string | null
   cable_label: string | null
+  /** Joined at read time from the item's cable, else its connection's cable (slice 3). */
+  cable_trail?: string | null
+  /** @deprecated use cable_trail */
   trail?: string | null
   created_at: string
   created_by: string | null
@@ -216,6 +228,28 @@ export interface SkippedConflictRow {
   hostname: string | null
   label: string | null
   messages: RowMessage[]
+  matrix_id?: string | null
+  a?: string | null
+  z?: string | null
+  cable_label?: string | null
+}
+
+/** committed[] / held[] / skipped[] row on CommitResult (ePIF and cable-matrix). */
+export interface CommitRow {
+  import_id: number
+  kind: ImportKind
+  row_number: number
+  hostname?: string | null
+  epif_id?: string | null
+  device_id?: number | null
+  epif_request_id?: number | null
+  matrix_id?: string | null
+  a?: string | null
+  z?: string | null
+  connection_id?: number | null
+  cable_id?: number | null
+  cable_label?: string | null
+  reasons?: RowMessage[]
 }
 
 export interface IntakeWarning {
@@ -231,6 +265,8 @@ export interface IntakeCommitResult {
   job: Job
   imports: JobImport[]
   warnings: IntakeWarning[]
+  committed: CommitRow[]
+  held: CommitRow[]
   skipped_conflicts: SkippedConflictRow[]
   open_item_count: number
   items: JobOpenItem[]
@@ -340,6 +376,7 @@ const ITEM_TYPE_LABELS: Record<string, string> = {
   pdu_missing: 'Missing PDU',
   missing_port: 'Missing port',
   unresolved_hop: 'Unresolved hop',
+  unresolved_device: 'Unresolved device',
   missing_cable_label: 'Missing cable label',
   missing_trail: 'Missing trail',
   epif_not_uploaded: 'ePIF not uploaded',
@@ -347,6 +384,9 @@ const ITEM_TYPE_LABELS: Record<string, string> = {
   space_power_flag: 'Space and power flag',
   media_missing: 'Missing media',
   ip_missing: 'Missing IP',
+  port_in_use: 'Port in use',
+  hop_in_use: 'Hop in use',
+  cable_label_conflict: 'Cable label conflict',
   other: 'Other',
 }
 
@@ -372,6 +412,27 @@ const FIELD_LABELS: Record<string, string> = {
   asset_tag: 'asset tag',
   managed_by: 'managed by',
   app_service: 'app service',
+  host_name_a: 'A hostname',
+  host_name_z: 'Z hostname',
+  port_a: 'A port',
+  port_z: 'Z port',
+  rack_a: 'A cabinet',
+  rack_z: 'Z cabinet',
+  hop_1: 'hop 1',
+  hop_2: 'hop 2',
+  hop_3: 'hop 3',
+  hop_4: 'hop 4',
+  hop_5: 'hop 5',
+  hop_6: 'hop 6',
+  hop_7: 'hop 7',
+  label: 'cable label',
+  cable_label: 'cable label',
+  trail: 'trail',
+  media: 'media',
+  speed_a: 'A speed',
+  speed_z: 'Z speed',
+  ip_address: 'IP address',
+  vlan: 'VLAN',
 }
 
 export function fieldLabel(field: string): string {
@@ -387,6 +448,14 @@ export function devicePageHref(item: Pick<JobOpenItem, 'device_id' | 'hostname'>
   if (item.device_id == null) return null
   if (item.hostname) return `/devices?q=${encodeURIComponent(item.hostname)}`
   return '/devices'
+}
+
+export function cableTrail(item: Pick<JobOpenItem, 'cable_trail' | 'trail'>): string | null {
+  return item.cable_trail ?? item.trail ?? null
+}
+
+export function normalizeOpenItem(item: JobOpenItem): JobOpenItem {
+  return { ...item, cable_trail: item.cable_trail ?? item.trail ?? null }
 }
 
 /** @deprecated use itemTypeLabel */
@@ -408,15 +477,15 @@ async function writeOpenItem(path: string, body?: unknown): Promise<OpenItemWrit
     method: 'POST',
     body: body === undefined ? undefined : JSON.stringify(body),
   })
-  if (res && typeof res === 'object' && 'item' in res) return res
-  return { item: res as JobOpenItem, job: await request<Job>(`/jobs/${(res as JobOpenItem).job_id}`) }
+  if (res && typeof res === 'object' && 'item' in res) {
+    const wrapped = res as OpenItemWriteResult
+    return { item: normalizeOpenItem(wrapped.item), job: wrapped.job }
+  }
+  return { item: normalizeOpenItem(res as JobOpenItem), job: await request<Job>(`/jobs/${(res as JobOpenItem).job_id}`) }
 }
 
-type LiveSkipped = {
-  import_id: number
-  kind: ImportKind
-  row_number: number
-  hostname: string | null
+type LiveSkipped = CommitRow & {
+  hostname?: string | null
   epif_id?: string | null
   reasons?: RowMessage[]
   messages?: RowMessage[]
@@ -425,29 +494,41 @@ type LiveSkipped = {
 type LiveCommit = {
   job: Job
   imports: JobImport[]
+  committed?: CommitRow[]
+  held?: CommitRow[]
   skipped?: LiveSkipped[]
   skipped_conflicts?: SkippedConflictRow[]
   warnings: IntakeWarning[]
   open_item_count: number
 }
 
-async function normalizeLiveCommit(jobId: number, raw: LiveCommit): Promise<IntakeCommitResult> {
-  const page = await listPage<JobOpenItem>(`/jobs/${jobId}/open-items`, { status: 'unresolved' })
-  const skipped = raw.skipped_conflicts ?? (raw.skipped ?? []).map((row) => ({
+function toSkippedConflict(row: LiveSkipped): SkippedConflictRow {
+  return {
     import_id: row.import_id,
     kind: row.kind,
     row_number: row.row_number,
-    hostname: row.hostname,
-    label: row.epif_id ?? null,
+    hostname: row.hostname ?? null,
+    label: row.cable_label ?? row.epif_id ?? null,
     messages: row.messages ?? row.reasons ?? [],
-  }))
+    matrix_id: row.matrix_id ?? null,
+    a: row.a ?? null,
+    z: row.z ?? null,
+    cable_label: row.cable_label ?? null,
+  }
+}
+
+async function normalizeLiveCommit(jobId: number, raw: LiveCommit): Promise<IntakeCommitResult> {
+  const page = await listPage<JobOpenItem>(`/jobs/${jobId}/open-items`, { status: 'unresolved' })
+  const skipped = raw.skipped_conflicts ?? (raw.skipped ?? []).map(toSkippedConflict)
   return {
     job: raw.job,
     imports: raw.imports,
     warnings: raw.warnings,
+    committed: raw.committed ?? [],
+    held: raw.held ?? [],
     skipped_conflicts: skipped,
     open_item_count: raw.open_item_count,
-    items: page.items,
+    items: page.items.map(normalizeOpenItem),
   }
 }
 
@@ -475,8 +556,9 @@ function pendingFromImport(imp: JobImport): JobOpenItem[] {
         import_row_id: row.id,
         filename: imp.filename,
         hostname: row.hostname,
-        cable_label: null,
-        trail: null,
+        cable_label: row.cable_label ?? row.label ?? null,
+        cable_trail: row.trail ?? null,
+        trail: row.trail ?? null,
         created_at: imp.uploaded_at,
         created_by: imp.uploaded_by,
         deferred_at: null,
@@ -547,7 +629,7 @@ function liveApi(): JobIntakeApi {
       const cable = details.find((i) => i.kind === 'cable_matrix') ?? null
       const job = await request<Job>(`/jobs/${jobId}`)
       const open = await listPage<JobOpenItem>(`/jobs/${jobId}/open-items`, { status: 'unresolved' })
-      const existing = open.items.filter((item) => {
+      const existing = open.items.map(normalizeOpenItem).filter((item) => {
         if (epif && item.item_type === 'epif_not_uploaded') return false
         if (cable && item.item_type === 'cable_matrix_not_uploaded') return false
         return true
@@ -569,7 +651,10 @@ function liveApi(): JobIntakeApi {
       const raw = await request<LiveCommit>(`/jobs/${jobId}/commit`, { method: 'POST' })
       return normalizeLiveCommit(jobId, raw)
     },
-    listOpenItems: (jobId, status = 'unresolved') => listPage<JobOpenItem>(`/jobs/${jobId}/open-items`, { status }),
+    async listOpenItems(jobId, status = 'unresolved') {
+      const page = await listPage<JobOpenItem>(`/jobs/${jobId}/open-items`, { status })
+      return { ...page, items: page.items.map(normalizeOpenItem) }
+    },
     deferItem: (jobId, itemId, note = null) =>
       writeOpenItem(`/jobs/${jobId}/open-items/${itemId}/defer`, { note }),
     undeferItem: (jobId, itemId) =>

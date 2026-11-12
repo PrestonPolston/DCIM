@@ -170,10 +170,85 @@ function installSlice2JobsApi() {
       if (!job) return json({ detail: { code: 'job_not_found', message: 'Job not found' } }, 404)
       const kind = url.searchParams.get('kind') ?? 'epif'
       const filename = url.searchParams.get('filename') ?? 'upload.csv'
-      if (kind === 'cable_matrix') {
-        return json({ detail: { code: 'import_kind_not_available', message: "Cable matrix import isn't available yet" } }, 422)
-      }
       const text = rawBody ?? ''
+      if (kind === 'cable_matrix') {
+        const headerLine = (text.split(/\r?\n/)[0] ?? '')
+        const headers = headerLine.split(',').map((h) => h.trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\bside\b/g, '').replace(/\bend\b/g, '').replace(/\s+/g, ' ').trim())
+        const has = (...names: string[]) => names.some((n) => headers.includes(n))
+        const missing: string[] = []
+        if (!has('a name', 'a host name', 'a hostname', 'a device')) missing.push('A Name')
+        if (!has('a port', 'a interface')) missing.push('A Port')
+        if (!has('z name', 'z host name', 'z hostname', 'z device')) missing.push('Z Name')
+        if (!has('z port', 'z interface')) missing.push('Z Port')
+        if (missing.length) {
+          return json({ detail: { code: 'missing_columns', message: `The cable matrix needs these columns: ${missing.join(', ')}`, columns: missing } }, 422)
+        }
+        const existingC = imports.find((i) => i.job_id === job.id && i.filename === filename && i.kind === 'cable_matrix')
+        if (existingC) {
+          return json({ ...existingC, reupload: existingC.status === 'committed' ? 'committed' : 'review' }, 200)
+        }
+        const col = (row: string[], name: string[]) => {
+          const i = headers.findIndex((h) => name.includes(h))
+          return i >= 0 ? (row[i] ?? '').trim() || null : null
+        }
+        const lines = text.split(/\r?\n/).slice(1).filter((l) => l.trim())
+        const used = new Set<string>()
+        const rows = lines.map((line, idx) => {
+          const cells = line.split(',').map((c) => c.trim())
+          const aName = col(cells, ['a name', 'a host name', 'a hostname', 'a device'])
+          const aPort = col(cells, ['a port', 'a interface'])
+          const zName = col(cells, ['z name', 'z host name', 'z hostname', 'z device'])
+          const zPort = col(cells, ['z port', 'z interface'])
+          const mid = col(cells, ['id'])
+          const trail = col(cells, ['trail'])
+          const label = col(cells, ['cable label', 'label'])
+          const a = aName && aPort ? `${aName}:${aPort}` : aName
+          const z = zName && zPort ? `${zName}:${zPort}` : zName
+          const messages: { code: string; field: string | null; message: string; level: 'held' | 'conflict' | 'warning'; item_type: string; target_field: string }[] = []
+          let result: 'ready' | 'warning' | 'held' | 'conflict' = 'ready'
+          const zKey = zName && zPort ? `${zName.toLowerCase()}:${zPort.toLowerCase()}` : ''
+          if (!zName || /^ghost|unknown|missing|unresolved/.test(zName)) {
+            result = 'held'
+            messages.push({ code: 'unresolved_device', field: 'z_name', message: `No live device named '${zName ?? ''}' (Z end)`, level: 'held', item_type: 'missing_hostname', target_field: 'host_name_z' })
+          } else if (zKey && used.has(zKey)) {
+            result = 'conflict'
+            messages.push({ code: 'port_in_use', field: 'z_port', message: `Z port ${zPort} on ${zName} is already used by an earlier row of this file`, level: 'conflict', item_type: 'other', target_field: 'port_z' })
+          } else if (zKey) {
+            used.add(zKey)
+          }
+          if (result === 'ready' && (!trail || !label)) {
+            result = 'warning'
+            if (!trail) messages.push({ code: 'missing_trail', field: 'trail', message: 'No trail.', level: 'warning', item_type: 'missing_trail', target_field: 'trail' })
+            if (!label) messages.push({ code: 'missing_cable_label', field: 'cable_label', message: 'No cable label.', level: 'warning', item_type: 'missing_cable_label', target_field: 'label' })
+          }
+          return { id: idx + 1, row_number: idx + 1, result, messages, hostname: aName, label, matrix_id: mid, a, z, trail, cable_label: label }
+        })
+        const counts = {
+          total: rows.length,
+          ready: rows.filter((r) => r.result === 'ready').length,
+          warning: rows.filter((r) => r.result === 'warning').length,
+          held: rows.filter((r) => r.result === 'held').length,
+          conflict: rows.filter((r) => r.result === 'conflict').length,
+          committed: 0,
+          skipped: 0,
+        }
+        const stagedC: JobImport = {
+          id: nextImport++,
+          job_id: job.id,
+          dcreq: job.dcreq,
+          kind: 'cable_matrix',
+          filename,
+          sha256: 'cab',
+          status: 'review',
+          uploaded_at: iso(),
+          uploaded_by: 'pat@example.com',
+          counts,
+          reupload: null,
+          rows,
+        }
+        imports.push(stagedC)
+        return json(stagedC, 201)
+      }
       if (/ilo password|secret/i.test(text.split('\n')[0] ?? '')) {
         return json({ detail: { code: 'import_forbidden_columns', message: 'Forbidden columns', headers: ['ilo password'] } }, 422)
       }
@@ -235,37 +310,133 @@ function installSlice2JobsApi() {
         : imports.filter((i) => i.job_id === job.id && i.status === 'review')
       if (batches.length === 0) return json({ detail: { code: 'no_review_imports', message: 'There are no imports in review on this job' } }, 409)
       if (batches.some((b) => b.status !== 'review')) return json({ detail: { code: 'import_not_in_review', message: "This import isn't in review" } }, 409)
+      const epifBatches = batches.filter((b) => b.kind === 'epif')
+      const cableBatches = batches.filter((b) => b.kind === 'cable_matrix')
       for (const b of batches) b.status = 'committed'
-      const epif = items.find((i) => i.job_id === job.id && i.item_type === 'epif_not_uploaded' && i.status === 'open')
-      if (epif) {
-        epif.status = 'resolved'
-        epif.resolved_at = iso()
-        epif.resolved_by = 'pat@example.com'
-      }
-      const pos = addFieldItem(job, 'nopos')
-      const other = items.find((i) => i.id === pos.id)
-      void other
-      job.device_count = 1
-      const view = flags(job)
-      return json({
-        job: view,
-        imports: batches,
-        committed: [{ import_id: batches[0].id, kind: 'epif', row_number: 1, hostname: 'web01', reasons: [] }],
-        held: [],
-        skipped: [{
-          import_id: batches[0].id,
+      const resolvedIds: number[] = []
+      const createdIds: number[] = []
+      const committed: Record<string, unknown>[] = []
+      const held: Record<string, unknown>[] = []
+      const skipped: Record<string, unknown>[] = []
+      const warnings: Record<string, unknown>[] = []
+      if (epifBatches.length) {
+        const epif = items.find((i) => i.job_id === job.id && i.item_type === 'epif_not_uploaded' && i.status === 'open')
+        if (epif) {
+          epif.status = 'resolved'
+          epif.resolved_at = iso()
+          epif.resolved_by = 'pat@example.com'
+          resolvedIds.push(epif.id)
+        }
+        const pos = addFieldItem(job, 'nopos')
+        createdIds.push(pos.id)
+        job.device_count = (job.device_count ?? 0) + 1
+        committed.push({ import_id: epifBatches[0].id, kind: 'epif', row_number: 1, hostname: 'web01', reasons: [] })
+        skipped.push({
+          import_id: epifBatches[0].id,
           kind: 'epif',
           row_number: 3,
           hostname: 'web01',
           reasons: [{ code: 'hostname_conflict', field: 'hostname', message: 'Hostname already used.', level: 'conflict', item_type: 'other' }],
-        }],
-        warnings: [
-          { code: 'missing_position', message: 'No RU.', field: 'position_u', item_type: 'missing_position', target_field: 'position_u', import_id: batches[0].id, row_number: 2, hostname: 'nopos' },
-          { code: 'pdu_missing', message: 'No PDU.', field: 'psu_1', item_type: 'pdu_missing', target_field: 'psu_1', import_id: batches[0].id, row_number: 4, hostname: 'web11' },
-        ],
-        open_items_created: [pos.id],
+        })
+        warnings.push(
+          { code: 'missing_position', message: 'No RU.', field: 'position_u', item_type: 'missing_position', target_field: 'position_u', import_id: epifBatches[0].id, row_number: 2, hostname: 'nopos' },
+          { code: 'pdu_missing', message: 'No PDU.', field: 'psu_1', item_type: 'pdu_missing', target_field: 'psu_1', import_id: epifBatches[0].id, row_number: 4, hostname: 'web11' },
+        )
+      }
+      if (cableBatches.length) {
+        const skipItem = items.find((i) => i.job_id === job.id && i.item_type === 'cable_matrix_not_uploaded' && (i.status === 'open' || i.status === 'deferred'))
+        if (skipItem) {
+          skipItem.status = 'resolved'
+          skipItem.resolved_at = iso()
+          skipItem.resolved_by = 'pat@example.com'
+          resolvedIds.push(skipItem.id)
+        }
+        let conn = 1
+        for (const b of cableBatches) {
+          for (const row of b.rows ?? []) {
+            const base = {
+              import_id: b.id, kind: 'cable_matrix' as const, row_number: row.row_number,
+              hostname: row.hostname, matrix_id: row.matrix_id, a: row.a, z: row.z,
+              cable_label: row.cable_label ?? row.label, reasons: row.messages,
+            }
+            if (row.result === 'conflict') {
+              row.result = 'skipped'
+              skipped.push(base)
+              const it: JobOpenItem = {
+                id: nextItem++, job_id: job.id, dcreq: job.dcreq, item_type: 'other', status: 'open',
+                target_field: row.messages[0]?.target_field ?? 'port_z', note: row.messages[0]?.message ?? null,
+                source: 'cable_matrix', device_id: null, connection_id: null, cable_id: null,
+                import_row_id: row.id, filename: b.filename, hostname: row.hostname,
+                cable_label: row.cable_label ?? row.label ?? null, cable_trail: row.trail ?? null,
+                created_at: iso(), created_by: 'pat@example.com',
+                deferred_at: null, deferred_by: null, resolved_at: null, resolved_by: null,
+              }
+              items.push(it)
+              createdIds.push(it.id)
+            } else if (row.result === 'held') {
+              held.push(base)
+              for (const msg of row.messages) {
+                warnings.push({ code: msg.code, message: msg.message, item_type: msg.item_type, target_field: msg.target_field, import_id: b.id, row_number: row.row_number, hostname: row.hostname })
+                const it: JobOpenItem = {
+                  id: nextItem++, job_id: job.id, dcreq: job.dcreq,
+                  item_type: (msg.item_type as JobOpenItem['item_type']) || 'missing_hostname',
+                  status: 'open',
+                  target_field: msg.target_field ?? msg.field, note: msg.message,
+                  source: 'cable_matrix', device_id: null, connection_id: null, cable_id: null,
+                  import_row_id: row.id, filename: b.filename, hostname: row.hostname,
+                  cable_label: row.cable_label ?? row.label ?? null, cable_trail: row.trail ?? null,
+                  created_at: iso(), created_by: 'pat@example.com',
+                  deferred_at: null, deferred_by: null, resolved_at: null, resolved_by: null,
+                }
+                items.push(it)
+                createdIds.push(it.id)
+              }
+            } else {
+              row.result = 'committed'
+              row.connection_id = conn
+              row.cable_id = conn
+              committed.push({ ...base, connection_id: conn, cable_id: conn })
+              job.connection_count = (job.connection_count ?? 0) + 1
+              for (const msg of row.messages) {
+                warnings.push({ code: msg.code, message: msg.message, item_type: msg.item_type, target_field: msg.target_field, import_id: b.id, row_number: row.row_number, hostname: row.hostname })
+                const it: JobOpenItem = {
+                  id: nextItem++, job_id: job.id, dcreq: job.dcreq,
+                  item_type: (msg.item_type as JobOpenItem['item_type']) || 'other',
+                  status: 'open',
+                  target_field: msg.target_field ?? msg.field, note: msg.message,
+                  source: 'cable_matrix', device_id: null, connection_id: conn, cable_id: conn,
+                  import_row_id: row.id, filename: b.filename, hostname: row.hostname,
+                  cable_label: row.cable_label ?? row.label ?? null, cable_trail: row.trail ?? null,
+                  created_at: iso(), created_by: 'pat@example.com',
+                  deferred_at: null, deferred_by: null, resolved_at: null, resolved_by: null,
+                }
+                items.push(it)
+                createdIds.push(it.id)
+              }
+              conn += 1
+            }
+          }
+          b.counts = {
+            total: (b.rows ?? []).length,
+            ready: 0, warning: 0,
+            held: (b.rows ?? []).filter((r) => r.result === 'held').length,
+            conflict: 0,
+            committed: (b.rows ?? []).filter((r) => r.result === 'committed').length,
+            skipped: (b.rows ?? []).filter((r) => r.result === 'skipped').length,
+          }
+        }
+      }
+      const view = flags(job)
+      return json({
+        job: view,
+        imports: batches,
+        committed,
+        held,
+        skipped,
+        warnings,
+        open_items_created: createdIds,
         open_item_count: view.unresolved_count,
-        resolved_item_ids: epif ? [epif.id] : [],
+        resolved_item_ids: resolvedIds,
       })
     }
 
@@ -408,7 +579,8 @@ describe('job intake live slice 2 routes (mocked fetch)', () => {
   it('returns friendly text for cable-matrix, forbidden columns, note_required and open_item_closed', async () => {
     const live = installSlice2JobsApi()
     const job = live.seedJob('DCREQ0001234')
-    await expect(jobIntakeApi().stageImport(job.id, 'cable_matrix', csv('cables.csv', 'Name\nx\n'))).rejects.toMatchObject({ status: 422, code: 'import_kind_not_available' })
+    await expect(jobIntakeApi().stageImport(job.id, 'cable_matrix', csv('cables.csv', 'Name\nx\n'))).rejects.toMatchObject({ status: 422, code: 'missing_columns' })
+    expect(friendlyMessage({ code: 'import_kind_not_available' }, 422)).toMatch(/isn't available yet/)
     try {
       await jobIntakeApi().stageImport(job.id, 'epif', csv('secrets.csv', 'Name,ilo password\nbox,hunter2\n'))
     } catch (e) {
@@ -488,5 +660,54 @@ describe('job intake live slice 2 routes (mocked fetch)', () => {
     expect(live.jobCalls.some((c) => c.path.endsWith('/resolve') && c.body?.includes('42'))).toBe(true)
     await user.click(screen.getByRole('tab', { name: /^Resolved$/ }))
     expect(await screen.findByRole('region', { name: 'Missing position' })).toHaveTextContent('Resolved: 42')
+  })
+
+
+  it('stages a cable-matrix CSV, previews rows, and lists committed, held and skipped rows after commit', async () => {
+    JOB_INTAKE_API.cableImports = true
+    installSlice2JobsApi()
+    const user = userEvent.setup()
+    const CABLE = [
+      'ID,Trail,Cable Label,A Name,A Port,Z Name,Z Port',
+      'C1,T-1,CAB-1,sw1,Eth1,srv1,eth0',
+      'C2,T-1,CAB-2,sw1,Eth2,ghost,eth0',
+      'C3,T-1,CAB-3,sw1,Eth3,srv1,eth0',
+      '',
+    ].join('\n')
+    renderWithProviders(<App />, '/jobs/new')
+    await screen.findByRole('heading', { name: 'New job' })
+    await user.type(screen.getByLabelText('DCREQ'), 'DCREQ0007777')
+    await user.click(screen.getByRole('button', { name: 'Next: ePIF' }))
+    await screen.findByRole('heading', { name: 'New job · DCREQ0007777' })
+    await user.click(screen.getByRole('button', { name: 'Skip ePIF' }))
+    await user.click(screen.getByRole('button', { name: 'Next: Cable matrix' }))
+    expect(screen.queryByText(/Cable matrix import isn't available yet/)).toBeNull()
+    await user.upload(screen.getByLabelText('Cable matrix CSV'), csv('cables.csv', CABLE))
+    expect(await screen.findByRole('status')).toHaveTextContent(/cables.csv: 3 rows/)
+    expect(screen.getByRole('status')).toHaveTextContent(/1 ready/)
+    expect(screen.getByRole('status')).toHaveTextContent(/1 held/)
+    expect(screen.getByRole('status')).toHaveTextContent(/1 conflict/)
+    await user.click(screen.getByRole('button', { name: 'Next: Preview' }))
+    expect(await screen.findByRole('heading', { name: /Preview/ })).toBeInTheDocument()
+    const preview = screen.getByRole('table', { name: 'Cable matrix preview' })
+    expect(preview).toHaveTextContent('sw1:Eth1')
+    expect(preview).toHaveTextContent('ghost:eth0')
+    expect(preview).toHaveTextContent('Unresolved device')
+    expect(preview).toHaveTextContent('Port in use')
+    await user.click(screen.getByRole('button', { name: /Commit job/ }))
+    const result = await screen.findByRole('region', { name: 'Import result' })
+    expect(result.textContent).toMatch(/1 connection/)
+    expect(result.textContent).not.toMatch(/1 connections/)
+    const committed = within(result).getByRole('table', { name: 'Committed connections' })
+    expect(committed).toHaveTextContent('sw1:Eth1')
+    expect(committed).toHaveTextContent('srv1:eth0')
+    expect(committed).toHaveTextContent('CAB-1')
+    const held = within(result).getByRole('table', { name: 'Held rows' })
+    expect(held).toHaveTextContent('ghost:eth0')
+    expect(held).toHaveTextContent('Unresolved device')
+    const skipped = within(result).getByRole('table', { name: 'Skipped conflict rows' })
+    expect(skipped).toHaveTextContent('srv1:eth0')
+    expect(skipped).toHaveTextContent('Port in use')
+    expect(result).toHaveTextContent('Missing hostname')
   })
 })

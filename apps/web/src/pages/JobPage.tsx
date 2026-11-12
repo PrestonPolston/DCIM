@@ -6,6 +6,7 @@ import {
   JOB_INTAKE_API,
   closeOpenItemsWarning,
   countLabel,
+  cableTrail,
   devicePageHref,
   fieldLabel,
   isJobHasOpenItems,
@@ -215,6 +216,7 @@ export default function JobPage() {
                         {!item.hostname && !item.filename ? itemTypeLabel(item.item_type) : null}
                         {item.target_field ? ` · ${fieldLabel(item.target_field)}` : ''}
                         {item.cable_label ? ` · ${item.cable_label}` : ''}
+                        {cableTrail(item) ? ` · ${cableTrail(item)}` : ''}
                         <span className="job-badge">{item.status}</span>
                       </p>
                       {item.status === 'deferred' && (

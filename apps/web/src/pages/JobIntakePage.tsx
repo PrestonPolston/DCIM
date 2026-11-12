@@ -6,6 +6,7 @@ import {
   isDuplicateDcreq,
   isValidDcreq,
   itemTypeLabel,
+  cableTrail,
   countLabel,
   jobCableImportsAvailable,
   jobHref,
@@ -15,23 +16,102 @@ import {
   type IntakeCommitResult,
   type IntakePreview,
   type ImportKind,
+  type ImportRow,
   type Job,
   type JobImport,
+  type CommitRow,
+  type SkippedConflictRow,
+  type RowMessage,
 } from '../api/jobIntake'
 import type { ExistingJobRef } from '../api/errors'
 import { useCan } from '../auth/auth'
 import { errMessage } from '../api/home'
 
 
-function itemLine(item: { hostname?: string | null; filename?: string | null; item_type: string; target_field?: string | null; status?: string }) {
+function itemLine(item: {
+  hostname?: string | null
+  filename?: string | null
+  item_type: string
+  target_field?: string | null
+  status?: string
+  cable_label?: string | null
+  cable_trail?: string | null
+  trail?: string | null
+}) {
   const lead = item.hostname ?? item.filename
   const type = itemTypeLabel(item.item_type)
   const bits = lead
     ? [<span key="h" className="mono">{lead}</span>, ` · ${type}`]
     : [type]
   if (item.target_field) bits.push(` · ${item.target_field}`)
+  if (item.cable_label) bits.push(` · ${item.cable_label}`)
+  const trail = cableTrail(item)
+  if (trail) bits.push(` · ${trail}`)
   if (item.status) bits.push(` · ${item.status}`)
   return bits
+}
+
+function reasonText(messages: RowMessage[] | undefined): string {
+  if (!messages?.length) return '—'
+  return messages.map((m) => {
+    const label = itemTypeLabel(m.code || m.item_type || '')
+    const code = m.code || m.item_type
+    const tagged = code && label && label.toLowerCase() !== (m.message ?? '').toLowerCase()
+      ? ` (${label})`
+      : ''
+    return `${m.message}${tagged}`
+  }).join('; ')
+}
+
+function CableRowsTable({ rows, caption }: { rows: ImportRow[]; caption: string }) {
+  return (
+    <table className="table" aria-label={caption}>
+      <thead><tr><th>Row</th><th>A</th><th>Z</th><th>Result</th><th>Reason</th></tr></thead>
+      <tbody>
+        {rows.map((row) => (
+          <tr key={row.id}>
+            <td>{row.row_number}</td>
+            <td className="mono">{row.a ?? '—'}</td>
+            <td className="mono">{row.z ?? '—'}</td>
+            <td>{row.result}</td>
+            <td>{reasonText(row.messages)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
+function CommitRowsTable({ rows, caption, kind }: { rows: Array<CommitRow | SkippedConflictRow>; caption: string; kind: 'committed' | 'held' | 'skipped' }) {
+  return (
+    <table className="table" aria-label={caption}>
+      <thead>
+        <tr>
+          <th>Row</th>
+          <th>A</th>
+          <th>Z</th>
+          {kind === 'committed' ? <th>Label</th> : <th>Reason</th>}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => {
+          const messages = 'messages' in row ? row.messages : row.reasons
+          return (
+            <tr key={`${row.import_id}-${row.row_number}`}>
+              <td>{row.row_number}</td>
+              <td className="mono">{row.a ?? (kind === 'skipped' && !row.z ? (row.hostname ?? '—') : '—')}</td>
+              <td className="mono">{row.z ?? '—'}</td>
+              <td>
+                {kind === 'committed'
+                  ? (('cable_label' in row ? row.cable_label : null) ?? ('label' in row ? row.label : null) ?? '—')
+                  : reasonText(messages)}
+              </td>
+            </tr>
+          )
+        })}
+      </tbody>
+    </table>
+  )
 }
 
 const STEPS = ['DCREQ', 'ePIF', 'Cable matrix', 'Preview'] as const
@@ -396,6 +476,9 @@ export default function JobIntakePage() {
               <p role="status">
                 Cable {preview.cable_matrix ? `${preview.cable_matrix.counts.total} rows: ${preview.cable_matrix.counts.ready} ready, ${preview.cable_matrix.counts.warning} warning, ${preview.cable_matrix.counts.held} held, ${preview.cable_matrix.counts.conflict} conflict` : (preview.skipped.cable_matrix ? 'skipped' : 'none')}
               </p>
+              {preview.cable_matrix?.rows && preview.cable_matrix.rows.length > 0 && (
+                <CableRowsTable rows={preview.cable_matrix.rows} caption="Cable matrix preview" />
+              )}
               <h3>Items that will stay in the fill-later queue ({pending.length})</h3>
               {pending.length === 0 ? <p className="hint">Nothing will be queued.</p> : (
                 <ul className="job-intake-queue" aria-label="Pending fill-later items">
@@ -438,17 +521,34 @@ export default function JobIntakePage() {
             </ul>
           )}
 
+          <h3>Committed connections</h3>
+          {result.committed.filter((r) => r.kind === 'cable_matrix').length === 0 ? (
+            <p className="hint">No connections were committed.</p>
+          ) : (
+            <CommitRowsTable
+              rows={result.committed.filter((r) => r.kind === 'cable_matrix')}
+              caption="Committed connections"
+              kind="committed"
+            />
+          )}
+
+          <h3>Held rows</h3>
+          {result.held.length === 0 ? <p className="hint">No rows were held.</p> : (
+            <CommitRowsTable rows={result.held} caption="Held rows" kind="held" />
+          )}
+
           <h3>Skipped conflict rows</h3>
           {result.skipped_conflicts.length === 0 ? <p className="hint">No conflict rows were skipped.</p> : (
             <table className="table" aria-label="Skipped conflict rows">
-              <thead><tr><th>File</th><th>Row</th><th>Hostname</th><th>Reason</th></tr></thead>
+              <thead><tr><th>File</th><th>Row</th><th>A</th><th>Z</th><th>Reason</th></tr></thead>
               <tbody>
                 {result.skipped_conflicts.map((row) => (
                   <tr key={`${row.import_id}-${row.row_number}`}>
-                    <td>{row.kind}</td>
+                    <td>{row.kind === 'cable_matrix' ? 'cable matrix' : 'ePIF'}</td>
                     <td>{row.row_number}</td>
-                    <td className="mono">{row.hostname ?? '—'}</td>
-                    <td>{row.messages.map((m) => m.message).join('; ')}</td>
+                    <td className="mono">{row.a ?? (row.z ? '—' : (row.hostname ?? '—'))}</td>
+                    <td className="mono">{row.z ?? '—'}</td>
+                    <td>{reasonText(row.messages)}</td>
                   </tr>
                 ))}
               </tbody>

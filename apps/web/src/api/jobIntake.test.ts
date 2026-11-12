@@ -12,6 +12,7 @@ import {
   isJobOverdue,
   isValidDcreq,
   closeOpenItemsWarning,
+  cableTrail,
   countLabel,
   devicePageHref,
   fieldLabel,
@@ -197,7 +198,7 @@ describe('imports and commit', () => {
       + 'CONFLICT-sw,ready\n',
     )
     const staged = await api().stageImport(job.id, 'epif', file)
-    expect(staged.counts).toEqual({ total: 3, ready: 1, warning: 1, held: 0, conflict: 1 })
+    expect(staged.counts).toMatchObject({ total: 3, ready: 1, warning: 1, held: 0, conflict: 1 })
     const preview = await api().previewJob(job.id)
     expect(preview.skipped.cable_matrix).toBe(true)
     expect(preview.pending_items.some((i) => i.item_type === 'cable_matrix_not_uploaded')).toBe(true)
@@ -250,6 +251,15 @@ describe('item labels and close warning copy', () => {
     expect(itemTypeLabel('cable_matrix_not_uploaded')).toBe('Cable matrix not uploaded')
     expect(itemTypeLabel('missing_position')).toBe('Missing position')
     expect(itemTypeLabel('pdu_missing')).toBe('Missing PDU')
+    expect(itemTypeLabel('unresolved_device')).toBe('Unresolved device')
+    expect(itemTypeLabel('unresolved_hop')).toBe('Unresolved hop')
+    expect(itemTypeLabel('missing_trail')).toBe('Missing trail')
+    expect(itemTypeLabel('missing_cable_label')).toBe('Missing cable label')
+    expect(itemTypeLabel('media_missing')).toBe('Missing media')
+    expect(itemTypeLabel('ip_missing')).toBe('Missing IP')
+    expect(itemTypeLabel('port_in_use')).toBe('Port in use')
+    expect(itemTypeLabel('hop_in_use')).toBe('Hop in use')
+    expect(itemTypeLabel('cable_label_conflict')).toBe('Cable label conflict')
   })
 
   it('uses readable field labels and pluralizes counts', () => {
@@ -300,5 +310,57 @@ describe('fill item', () => {
     expect(filled.job.unresolved_count).toBe(2) // two not-uploaded items remain; seeded item resolved
     expect((await api().getJob(job.id)).unresolved_count).toBe(2)
     void seeded
+  })
+})
+
+describe('cable-matrix mock import', () => {
+  it('requires A Name, A Port, Z Name and Z Port, and accepts A/Z aliases', async () => {
+    const job = await api().createJob('DCREQ0007001')
+    await expect(api().stageImport(job.id, 'cable_matrix', csv('A Name,A Port,Z Name\nsw1,Eth1,srv1\n', 'cables.csv'))).rejects.toMatchObject({
+      status: 422, code: 'missing_columns',
+    })
+    const staged = await api().stageImport(
+      job.id,
+      'cable_matrix',
+      csv('A Side Hostname,A Port,Z Name,Z End Interface\nsw1,Eth1,srv1,eth0\n', 'cables.csv'),
+    )
+    expect(staged.kind).toBe('cable_matrix')
+    expect(staged.counts.total).toBe(1)
+    expect((staged.counts.ready ?? 0) + (staged.counts.warning ?? 0)).toBe(1)
+    expect(staged.rows?.[0]).toMatchObject({ a: 'sw1:Eth1', z: 'srv1:eth0' })
+    expect(['ready', 'warning']).toContain(staged.rows?.[0].result)
+  })
+
+  it('commits resolved rows, holds an unresolved device, skips port_in_use, and keeps cable_trail', async () => {
+    const job = await api().createJob('DCREQ0007002')
+    const body = [
+      'ID,Trail,Cable Label,A Name,A Port,Z Name,Z Port',
+      'C1,T-1,CAB-1,sw1,Eth1,srv1,eth0',
+      'C2,T-1,CAB-2,sw1,Eth2,ghost,eth0',
+      'C3,T-1,CAB-3,sw1,Eth3,srv1,eth0',
+      '',
+    ].join('\n')
+    const staged = await api().stageImport(job.id, 'cable_matrix', csv(body, 'cables.csv'))
+    expect(staged.rows?.map((r) => r.result)).toEqual(['ready', 'held', 'conflict'])
+    expect(staged.rows?.[1].messages[0].code).toBe('unresolved_device')
+    expect(staged.rows?.[2].messages[0].code).toBe('port_in_use')
+    const preview = await api().previewJob(job.id)
+    expect(preview.cable_matrix?.id).toBe(staged.id)
+    expect(preview.pending_items.some((i) => i.item_type === 'missing_hostname')).toBe(true)
+    const result = await api().commitIntake(job.id)
+    expect(result.job.connection_count).toBe(1)
+    expect(result.committed).toEqual([
+      expect.objectContaining({ kind: 'cable_matrix', row_number: 1, a: 'sw1:Eth1', z: 'srv1:eth0', cable_label: 'CAB-1', connection_id: expect.any(Number) }),
+    ])
+    expect(result.held).toEqual([
+      expect.objectContaining({ row_number: 2, z: 'ghost:eth0', reasons: [expect.objectContaining({ code: 'unresolved_device' })] }),
+    ])
+    expect(result.skipped_conflicts).toEqual([
+      expect.objectContaining({ row_number: 3, z: 'srv1:eth0', messages: [expect.objectContaining({ code: 'port_in_use' })] }),
+    ])
+    const heldItem = result.items.find((i) => i.item_type === 'missing_hostname')
+    expect(heldItem).toMatchObject({ cable_label: 'CAB-2', source: 'cable_matrix' })
+    expect(cableTrail(heldItem!)).toBe('T-1')
+    expect(result.items.find((i) => i.item_type === 'cable_matrix_not_uploaded')?.status).toBe('resolved')
   })
 })

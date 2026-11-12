@@ -152,3 +152,32 @@ describe('CSV upload, preview and import result', () => {
     expect(job.unresolved_count).toBe(3)
   })
 })
+
+describe('cable matrix intake', () => {
+  it('uploads a cable matrix, previews rows, and lists committed, held and skipped rows after commit', async () => {
+    const user = userEvent.setup()
+    const CABLE = [
+      'ID,Trail,Cable Label,A Name,A Port,Z Name,Z Port',
+      'C1,T-1,CAB-1,sw1,Eth1,srv1,eth0',
+      'C2,T-1,CAB-2,sw1,Eth2,ghost,eth0',
+      'C3,T-1,CAB-3,sw1,Eth3,srv1,eth0',
+      '',
+    ].join('\n')
+    renderWithProviders(<App />, '/jobs/new')
+    await screen.findByRole('heading', { name: 'New job' })
+    await user.type(screen.getByLabelText('DCREQ'), 'DCREQ0007010')
+    await user.click(screen.getByRole('button', { name: 'Next: ePIF' }))
+    await user.click(await screen.findByRole('button', { name: 'Skip ePIF' }))
+    await user.click(screen.getByRole('button', { name: 'Next: Cable matrix' }))
+    await user.upload(screen.getByLabelText('Cable matrix CSV'), csv('cables.csv', CABLE))
+    expect(await screen.findByRole('status')).toHaveTextContent('cables.csv: 3 rows')
+    await user.click(screen.getByRole('button', { name: 'Next: Preview' }))
+    expect(await screen.findByRole('table', { name: 'Cable matrix preview' })).toHaveTextContent('sw1:Eth1')
+    await user.click(screen.getByRole('button', { name: /Commit job/ }))
+    const result = await screen.findByRole('region', { name: 'Import result' })
+    expect(result.textContent).toMatch(/1 connection/)
+    expect(within(result).getByRole('table', { name: 'Committed connections' })).toHaveTextContent('CAB-1')
+    expect(within(result).getByRole('table', { name: 'Held rows' })).toHaveTextContent('Unresolved device')
+    expect(within(result).getByRole('table', { name: 'Skipped conflict rows' })).toHaveTextContent('Port in use')
+  })
+})
