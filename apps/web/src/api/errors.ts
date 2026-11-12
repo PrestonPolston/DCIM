@@ -91,7 +91,10 @@ export function jobTextViolation(
       const c = ch.charCodeAt(0)
       return c < 32 || c === 127
     })) {
-      return { code: 'invalid_text', message: textRejectionCopy('invalid_text', field), field }
+      const message = field === 'description'
+        ? 'description must not contain control characters (it must be a single line)'
+        : textRejectionCopy('invalid_text', field)
+      return { code: 'invalid_text', message, field }
     }
     return null
   }
@@ -200,6 +203,9 @@ export function textFieldError(e: unknown, field?: string | null): string | null
   const errField = d?.field ?? field
   if (code === 'invalid_text' || code === 'formula_prefix') {
     if (field && errField && errField !== field) return null
+    if (code === 'invalid_text' && (errField === 'description' || field === 'description') && d?.message) {
+      return d.message
+    }
     return friendlyMessage({ ...(d ?? {}), code, field: errField ?? field ?? undefined }, err.status)
       ?? textRejectionCopy(code, errField ?? field)
   }

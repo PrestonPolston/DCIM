@@ -432,13 +432,22 @@ export default function JobIntakePage() {
           <label className="field">
             Description
             <textarea
-              rows={2}
+              rows={1}
+              className="job-intake-oneline"
               autoComplete="off"
               aria-label="Description"
               aria-invalid={fieldError.description ? true : undefined}
               value={description}
               disabled={!canWrite || busy}
-              onChange={(e) => { setDescription(e.target.value); setFieldError((err) => ({ ...err, description: undefined })) }}
+              onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault() }}
+              onChange={(e) => {
+                const value = e.target.value
+                setDescription(value)
+                setFieldError((err) => ({
+                  ...err,
+                  description: /[\r\n\t]/.test(value) ? 'Description must be one line' : undefined,
+                }))
+              }}
             />
           </label>
           {fieldError.description && (

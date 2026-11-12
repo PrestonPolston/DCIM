@@ -394,6 +394,10 @@ describe('note validation copy', () => {
     ])).toBe("This note has characters that aren't allowed.")
     const coded = new ApiError(422, 'raw', { detail: { code: 'invalid_text', message: 'raw', field: 'note' } })
     expect(noteFieldError(coded)).toBe("This note has characters that aren't allowed.")
+    const desc = new ApiError(422, 'This description has characters that aren\'t allowed.', {
+      detail: { code: 'invalid_text', message: 'description must not contain control characters (it must be a single line)', field: 'description' },
+    })
+    expect(textFieldError(desc, 'description')).toBe('description must not contain control characters (it must be a single line)')
     const pydantic = new ApiError(422, ': Value error, note must not contain control characters', {
       detail: [{ type: 'value_error', loc: ['body'], msg: 'Value error, note must not contain control characters' }],
     })

@@ -755,4 +755,10 @@ button.link, .link {
 .user-text, .job-item-note { margin: 0; white-space: pre-wrap; }
 .job-intake-devices { margin: 0.25rem 0 1rem; padding-left: 1.25rem; }
 .job-intake-devices li { margin: 0; }
+.job-intake-oneline {
+  font: inherit; font-size: var(--fs-md); min-height: var(--tap); padding: 0 var(--space-3);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text);
+  resize: none; overflow-x: auto; overflow-y: hidden; white-space: pre; field-sizing: fixed; line-height: calc(var(--tap) - 2px);
+}
+.job-intake-oneline[aria-invalid='true'] { overflow-y: auto; white-space: pre-wrap; }
 .job-queue-item textarea { width: 100%; min-height: 4.5rem; }
