@@ -69,7 +69,7 @@ Device enums: `status` is one of `install | active | decom`, default **`install`
   |---|---|---|---|
   | GET anything (except below) | yes | yes | yes |
   | `/users`, `/audit-events` | yes | no | no |
-  | Create/patch devices, CSV import, create device types and profiles, create/close/reopen jobs, job CSV imports and open-item actions | yes | yes | no |
+  | Create/patch devices, CSV import, create device types and profiles, create/close/reopen jobs, job CSV imports (ePIF, cable matrix) and open-item actions | yes | yes | no |
   | Move a cabinet (PATCH `/racks/{id}` with only `pos_x`, `pos_y`, `orientation`) | yes | yes | no |
   | Create/patch/delete sites, halls, rows, cabinets; delete devices; patch/delete device types and profiles | yes | no | no |
   Wrong role → 403; no session → 401.
@@ -333,7 +333,7 @@ A baseline subset of DB item 11. It has device ports, cables (types `RJ45`, `LC`
 - Both ends must be live (not deleted) devices. Only endpoint ports can be connected.
 - `DELETE /connections/{id}` removes the record and frees both ports. Its cable is deleted with it (cables have no status in v1), so the label can be reused.
 - **Decommissioning a device keeps its connections.** This is the v1 rule. What decom should do to connections is **pending Preston's decision (PC1)**, and P2 item 14 ("decom removes connections") is not applied. They show as `decom` until someone deletes them, so they can be traced before the cables are pulled. Soft-deleting a device also keeps them.
-- Cable labels are unique, case-insensitive. `cable_type` is limited to `RJ45`, `LC` and `DAC`, enforced by a DB CHECK and the API. Ports also carry `lanes`, `rear_port_id` and `rear_position` columns for future panels and breakouts. v1 ignores them, and every connection uses lane 0. A clash returns 409 `{"code":"cable_label_conflict"}`.
+- Cable labels are unique, case-insensitive. `cable_type` is limited to `RJ45`, `LC` and `DAC`, enforced by a DB CHECK and the API. Ports also carry `lanes`, `rear_port_id` and `rear_position` columns for future panels and breakouts. The manual API ignores them and uses lane 0; the job cable-matrix import (see Jobs) writes breakout lanes and hops. A clash returns 409 `{"code":"cable_label_conflict"}`.
 
 **Endpoints.** Every role can read and export. Admin and technician can write.
 | Method | Path | Notes |
@@ -481,7 +481,7 @@ A cabinet profile describes the cabinet alone, with doors and rails included. It
 
 **Audit.** Every action is in `audit_events` with `entity_type=cabinet_profile`, under a change set: `cabinet_profile.create|update|delete` (the listener; delete carries the full snapshot) and `cabinet_profile.publish|retire|unretire|clone|image.put|image.delete`.
 
-## Jobs (job intake v1, slices 1–2; migrations `p1_30_project_dcreq` … `p1_33b_epif_requests`)
+## Jobs (job intake v1, slices 1–3; migrations `p1_30_project_dcreq` … `p1_34_cable_matrix_rest`)
 
 Spec: `docs/db/JOB_INTAKE.md` (D104–D109) and `docs/design/job-intake.md`. A **job** is a `projects` row whose **primary DCREQ** (`project_references(kind='DCREQ')`, `projects.primary_dcreq_id`) is the job number. Projects without a primary DCREQ (legacy) are not jobs and are not listed. Reads: every signed-in role. Writes: **technician or admin** (read-only 403 `Requires role: admin or technician`; no session 401). Timestamps are UTC with `Z`.
 
@@ -494,15 +494,15 @@ Spec: `docs/db/JOB_INTAKE.md` (D104–D109) and `docs/design/job-intake.md`. A *
 | `GET /jobs/{id_or_dcreq}` | any | `JobDetail`. A numeric key is the id; anything else is normalized as a DCREQ. Unknown or soft-deleted → **404** `job_not_found`. |
 | `POST /jobs/{id_or_dcreq}/close` `{acknowledge_open_items?: bool, note?}` | tech/admin | With unresolved items (open + deferred) and no `acknowledge_open_items: true` → **409** `{code: "job_has_open_items", message, unresolved_count}`, nothing changes. `message` is plain text the web can show as-is (it never names request fields). Otherwise **200** `{job: JobDetail, warning: {code: "job_has_open_items", message, unresolved_count} | null}`. Sets `closed_at`/`closed_by`; items stay. Already closed → 409 `job_already_closed`. Audit `job.close` (with the count and whether it was acknowledged). Body is optional when there are no unresolved items. |
 | `POST /jobs/{id_or_dcreq}/reopen` `{note?}` | tech/admin | **200** `{job: JobDetail}`. `status=open`, `closed_at`/`closed_by` cleared. **`opened_at` is never rewritten**, so the 30-day clock keeps running from DCREQ entry. Already open → 409 `job_already_open`. Audit `job.reopen`. |
-| `GET /jobs/{id_or_dcreq}/open-items?status=unresolved|open|deferred|resolved|dismissed|all` | any | `OpenItem[]` (default `unresolved` = open + deferred), `X-Total-Count`, oldest first. `filename`, `hostname` (device, else the ePIF request's name), `cable_label` are joined at read time. |
+| `GET /jobs/{id_or_dcreq}/open-items?status=unresolved|open|deferred|resolved|dismissed|all` | any | `OpenItem[]` (default `unresolved` = open + deferred), `X-Total-Count`, oldest first. `filename`, `hostname` (device, else the ePIF request's name), `cable_label` and `cable_trail` (the item's cable, else its connection's cable) are joined at read time. |
 | `POST /jobs/{id_or_dcreq}/open-items/{item_id}/defer` `{note?}` | tech/admin | open → deferred (`deferred_at/by` set). See **Open-item actions**. |
 | `POST /jobs/{id_or_dcreq}/open-items/{item_id}/undefer` | tech/admin | deferred → open. |
 | `POST /jobs/{id_or_dcreq}/open-items/{item_id}/dismiss` `{note}` | tech/admin | open/deferred → dismissed. **`note` required** (blank → 422 `note_required`). |
 | `POST /jobs/{id_or_dcreq}/open-items/{item_id}/resolve` `{note?}` | tech/admin | open/deferred → resolved. |
 
-**Job** fields: `id, dcreq, name, description, site_id, primary_dcreq_id, status (open|closed), opened_at, closed_at, closed_by, created_at, updated_at, created_by`, and computed (never stored): `current` (open and not deleted), `overdue` (current and `opened_at` more than 30 days ago), `overdue_at` (`opened_at` + 30 days), `days_open` (whole days since `opened_at`), `recently_closed` (closed and `closed_at` within 30 days), `days_since_closed`, `unresolved_count` (open + deferred items), `deferred_count`, `device_count` (live devices with this `project_id`). **JobDetail** adds `unresolved_by_type` `{item_type: n}`.
+**Job** fields: `id, dcreq, name, description, site_id, primary_dcreq_id, status (open|closed), opened_at, closed_at, closed_by, created_at, updated_at, created_by`, and computed (never stored): `current` (open and not deleted), `overdue` (current and `opened_at` more than 30 days ago), `overdue_at` (`opened_at` + 30 days), `days_open` (whole days since `opened_at`), `recently_closed` (closed and `closed_at` within 30 days), `days_since_closed`, `unresolved_count` (open + deferred items), `deferred_count`, `device_count` (live devices with this `project_id`), `connection_count` (non-removed connections whose cable has `project_id` = this job, i.e. written by this job's cable matrix). **JobDetail** adds `unresolved_by_type` `{item_type: n}`.
 
-**OpenItem** fields: `id, job_id, dcreq, item_type, status (open|deferred|resolved|dismissed), target_field, note, source (epif|cable_matrix|manual), epif_request_id, device_id, connection_id, cable_id, import_row_id, filename, hostname, cable_label, created_at, created_by, deferred_at, deferred_by, resolved_at, resolved_by`. `item_type` is one of `epif_not_uploaded, cable_matrix_not_uploaded, missing_hostname, missing_profile, profile_not_usable, unresolved_cabinet, missing_position, missing_serial, missing_psu, psu_unparsed, pdu_missing, missing_port, unresolved_hop, missing_cable_label, missing_trail, media_missing, ip_missing, space_power_flag, other`.
+**OpenItem** fields: `id, job_id, dcreq, item_type, status (open|deferred|resolved|dismissed), target_field, note, source (epif|cable_matrix|manual), epif_request_id, device_id, connection_id, cable_id, import_row_id, filename, hostname, cable_label, cable_trail, created_at, created_by, deferred_at, deferred_by, resolved_at, resolved_by`. `item_type` is one of `epif_not_uploaded, cable_matrix_not_uploaded, missing_hostname, missing_profile, profile_not_usable, unresolved_cabinet, missing_position, missing_serial, missing_psu, psu_unparsed, pdu_missing, missing_port, unresolved_hop, missing_cable_label, missing_trail, media_missing, ip_missing, space_power_flag, other`.
 
 Example `POST /jobs` `{"dcreq": "DCREQ0001234", "name": "Leaf refresh"}` → 201:
 
@@ -531,11 +531,13 @@ Duplicate → 409:
 
 ### ePIF import (slice 2)
 
+`POST /jobs/{key}/commit` commits every batch in review, **ePIF batches first** (then by id), so a cable row whose end is a device created by the ePIF in the same commit resolves.
+
 A CSV is always uploaded **onto an existing job** (`job_key` from step 1); it never creates one (unknown key → 404 `job_not_found`). Closed job → 409 `job_closed` (upload and commit). Writes need tech/admin.
 
 | Route | Role | Result |
 |---|---|---|
-| `POST /jobs/{key}/imports?kind=epif&filename=…` body = the file, `Content-Type: text/csv` | tech/admin | **201** `JobImportDetail` (status `review`, every row with `result` + `messages`). Same bytes (sha256) already on this job: **200**, `reupload: "review"` (same batch re-validated against today's DB) or `"committed"` (returned as-is, nothing staged). Nothing live is written. `kind=cable_matrix` → 422 `import_kind_not_available` (slice 3). Size/row caps and 413/415/NUL/UTF-8 errors are the device CSV ones (`csv_max_bytes`, `csv_max_rows`). |
+| `POST /jobs/{key}/imports?kind=epif&filename=…` body = the file, `Content-Type: text/csv` | tech/admin | **201** `JobImportDetail` (status `review`, every row with `result` + `messages`). Same bytes (sha256) already on this job: **200**, `reupload: "review"` (same batch re-validated against today's DB) or `"committed"` (returned as-is, nothing staged). Nothing live is written. `kind=cable_matrix`: see **Cable-matrix import** below. Size/row caps and 413/415/NUL/UTF-8 errors are the device CSV ones (`csv_max_bytes`, `csv_max_rows`). |
 | `GET /jobs/{key}/imports?status=review|committed|abandoned` | any | `JobImport[]` (no rows), newest first, `X-Total-Count`, limit/offset. |
 | `GET /jobs/{key}/imports/{import_id}` | any | `JobImportDetail` (the preview). 404 `import_not_found`. |
 | `POST /jobs/{key}/imports/{import_id}/abandon` | tech/admin | **200** `JobImport` (status `abandoned`). Not in review → 409 `import_not_in_review`. |
@@ -594,4 +596,48 @@ Example: upload (3 rows; row 2 repeats `web01` in R01, row 3 has no RU) → 201 
 
 `POST /jobs/1/open-items/2/dismiss` `{}` → 422 `{"detail": {"code": "note_required", "message": "Say why this item is dismissed", "field": "note"}}`; resolving it twice → 409 `{"detail": {"code": "open_item_closed", "message": "This item is already resolved", "status": "resolved"}}`.
 
-Not yet: cable-matrix import and hops (slice 3, after `p1_34_cable_matrix_rest`), PDU/PSU assignments (PSUs stay staged + `pdu_missing`), applying Remove rows, re-import that fills empty fields on existing devices, abandon job (`DELETE /jobs/{id}`), and the home job tiles (still parked).
+### Cable-matrix import (slice 3)
+
+Same routes as the ePIF import with `kind=cable_matrix` (`POST /jobs/{key}/imports?kind=cable_matrix&filename=…`, preview, abandon, per-import and whole-job commit, re-upload by sha256, `job_closed`, roles). Committing a cable-matrix batch auto-resolves `cable_matrix_not_uploaded`.
+
+**Schema (`p1_34_cable_matrix_rest`).** `cables` + `external_id` (the matrix ID, unique when set), `trail` (indexed), `cable_mode` (`smf|mmf|copper|dac|aoc|mpo`), `status` (`planned|active|removed`, default `active`) + `removed_at`, `project_id` (the job). `connections` + `status`, `removed_at`, `action` (`add|remove|move`), `change_set_id`. New `connection_hops (connection_id, seq 1..32, port_id, lane, cable_id, label, is_active)` with one active hop per (port, lane), and `port_ip_config (port_id, network, vlan, native_vlan, ip_address, prefix_len, default_gateway)`. The (port, lane) uniques and `uq_cables_label` ignore removed rows. The manual `/connections` API is unchanged (it writes `active` rows; its busy-port check now ignores removed connections). Admin hard delete of a panel that connections hop through → 409 `device_has_connections`.
+
+**Headers** (matched after trim/lowercase/punctuation → `_`). `ID`, `Trail`, `Action`, `Cable Type`, `Cable Mode`, `Cable Color`, `Cable Length`, `Cable Label`; per end, with prefix `A ` / `Z ` (also `A Side `, `Side A `, `A End `): `Name`/`Host Name`/`Device`, `Row`, `Rack`/`Cabinet`, `RU`, `Slot`/`Slot/Blade/Card`, `Port`/`Interface`, `Lane`, `XCVR Make`, `XCVR Model`/`XCVR`, `Connector`, `Speed`; Z-side IP: `Network`, `VLAN`, `Native VLAN`, `IP`, `Default Gateway`/`GW`, `Subnet Mask`/`Mask` (with or without `Z `); `TAP`; `Hop1`–`Hop7` (`Hop 1` too). **Required columns:** A Name, A Port, Z Name, Z Port (422 `missing_columns`). Secret/iLO headers → 422 `import_forbidden_columns` (names only, nothing staged); unknown/duplicate → 422.
+
+**A row commits when both A and Z ports resolve.** An end resolves to a live device by host name (case-insensitive; `Row`/`Rack` narrow duplicates), then a port by slot + name. A port that doesn't exist yet is **created** as an endpoint port at commit (info `port_created`, same as the quick entry in `POST /connections`).
+
+| level | codes | on commit |
+|---|---|---|
+| conflict | `port_in_use` ((port, lane) already in a non-removed connection, either column, or an earlier row; on a breakout port lane 0 and lane N exclude each other), `hop_in_use` (a hop's (port, lane) already used), `cable_label_conflict` (live label, case-insensitive, or earlier row), `duplicate_matrix_id`, `matrix_id_already_imported`, `self_connection`, `lane_out_of_range` (lane > the port's `lanes`) | **skipped** with `reasons`; `other` item on the staging row. Re-checked at commit (savepoint per row); a late clash is `port_in_use` / `write_conflict`. |
+| held | `missing_hostname` / `unresolved_device` (→ `missing_hostname`, `host_name_a|z`), `ambiguous_device` (→ `unresolved_cabinet`, `rack_a|z`), `missing_port` (`port_a|z`), `port_not_endpoint` (a panel port named as an end), `action_not_applied` (Remove/Move), `action_unknown` | **no connection**; items on the staging row (`import_row_id`, no target). |
+| warning | `hop_unresolved` (→ `unresolved_hop`, `hop_N`), `missing_trail`, `missing_cable_label`, `media_missing` (cable type or mode missing; note lists the missing cable fields), `speed_unparsed` (→ `media_missing`, `speed_a|z`), `ip_invalid` (→ `ip_missing`, field), `cabinet_mismatch` (→ `unresolved_cabinet`), `ru_mismatch`, `lane_invalid`, `matrix_id_missing`, `action_defaulted` (blank → Add), `formula_text`, `value_truncated` | connection **written**; trail/label/media/ID items point at the **cable**, the rest at the **connection**. |
+| info | `port_created`, `port_value_kept` (port already has a different transceiver/connector/speed; kept), `cable_type_unknown` / `cable_mode_unknown` / `length_unparsed` (value not stored) | — |
+
+**Hops.** `panel:port` (e.g. `pnl-01:F2`); the panel is a live device by host name, the port must be a panel `front`/`rear` port. A blank hop cell is fine (direct cable); a hop that is named but doesn't resolve is an `unresolved_hop` item and the A↔Z connection is still written. **Breakout:** when an end port has `lanes` > 1 and no `Lane` is given, the lane is the `rear_position` of the first front hop; a rear hop carries that MPO position as its lane. Four rows sharing one 400G port through F1–F4 commit as four connections on lanes 1–4.
+
+**Writes per committed row** (one change set for the commit): missing endpoint ports; empty port fields (`transceiver_make/model`, `connector`, `speed_mbps` from `25G`/`100 Gbps`, `kind=tap` from a truthy Z `TAP`); a cable (`label, cable_type, cable_mode, color, length_m, trail, external_id = ID, project_id = job, status active`); the connection (canonical port order, lanes travel with their ports, `status active, action add, change_set_id`); hops; Z-port `port_ip_config` (mask `255.255.255.0` or `/24` → `prefix_len` 24). Audit `connection.create` per row (with `import_batch_id`), plus `job_import.commit` and `job_open_item.create`. Rows: `import_rows.connection_id` / `cable_id`.
+
+**ImportRow** (cable matrix) adds `matrix_id, a, z` (`host:slot/port` as written), `trail, cable_label, connection_id, cable_id`; `hostname` is the A name. **CommitRow** adds `matrix_id, a, z, connection_id, cable_id, cable_label`. Messages may carry `target: "cable"`.
+
+Example: 4 rows. Rows 1–2 break out `leaf-01:Eth1/49` (4 lanes) through `pnl-01:F1`/`F2` + `R1`; row 2 has no label, trail or mode; row 3's Z device doesn't exist; row 4 reuses `srv-01:eth0`. `POST /jobs/1/imports/1/commit` → 200 (abridged):
+
+```json
+{"job": {"id": 1, "connection_count": 2, "unresolved_count": 6,
+         "unresolved_by_type": {"epif_not_uploaded": 1, "media_missing": 1, "missing_cable_label": 1, "missing_hostname": 1, "missing_trail": 1, "other": 1}, …},
+ "committed": [{"import_id": 1, "kind": "cable_matrix", "row_number": 1, "matrix_id": "CM-001", "hostname": "leaf-01",
+                "a": "leaf-01:Eth1/49", "z": "srv-01:eth0", "connection_id": 1, "cable_id": 1, "cable_label": "CAB-0001", "reasons": [], …},
+               {"row_number": 2, "matrix_id": "CM-002", "a": "leaf-01:Eth1/49", "z": "srv-02:eth0", "connection_id": 2, "cable_id": 2, "cable_label": null, …}],
+ "held": [{"row_number": 3, "matrix_id": "CM-003", "a": "leaf-01:Eth1/50", "z": "srv-09:eth0",
+           "reasons": [{"code": "unresolved_device", "field": "z_name", "message": "No live device named 'srv-09' (Z end)", "level": "held",
+                        "item_type": "missing_hostname", "target_field": "host_name_z", "target": null}], …}],
+ "skipped": [{"row_number": 4, "matrix_id": "CM-004", "a": "leaf-01:Eth1/51", "z": "srv-01:eth0",
+              "reasons": [{"code": "port_in_use", "field": "z_port", "message": "Z port eth0 on srv-01 is already used by row 1 of this file",
+                           "level": "conflict", "item_type": "other", "target_field": "port_z", "target": null}], …}],
+ "warnings": [{"code": "missing_cable_label", "message": "No cable label", "field": "cable_label", "item_type": "missing_cable_label",
+               "target_field": "label", "import_id": 1, "row_number": 2, "hostname": "leaf-01"}, …],
+ "open_items_created": [3, 4, 5, 6, 7], "open_item_count": 6, "resolved_item_ids": [2]}
+```
+
+Connections 1 and 2 are on lanes 1 and 2 of `Eth1/49`, with hops `(1, pnl-01:F1, lane 0), (2, pnl-01:R1, lane 1)` and `(1, F2, 0), (2, R1, 2)`. Row 1's Z port got `port_ip_config {vlan: 120, ip_address: "10.20.0.11", prefix_len: 24}` and `speed_mbps` 100000.
+
+Not yet: PDU/PSU assignments (PSUs stay staged + `pdu_missing`), applying Remove/Move rows (ePIF and cable), exposing hops / IP config / cable status on the `/connections` API, re-import that fills empty fields on existing devices, abandon job (`DELETE /jobs/{id}`), and the home job tiles (still parked).

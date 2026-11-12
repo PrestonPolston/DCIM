@@ -7473,7 +7473,7 @@
           "jobs"
         ],
         "summary": "Upload Import",
-        "description": "Stage a CSV on an EXISTING job (a CSV never creates a job) and return the validated preview.\nBody: the raw file with Content-Type: text/csv. Nothing live is written until commit.",
+        "description": "Stage a CSV (kind=epif or cable_matrix) on an EXISTING job (a CSV never creates a job) and return the\nvalidated preview.\nBody: the raw file with Content-Type: text/csv. Nothing live is written until commit.",
         "operationId": "upload_import_jobs__job_key__imports_post",
         "parameters": [
           {
@@ -9322,6 +9322,17 @@
             ],
             "title": "Epif Id"
           },
+          "matrix_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Matrix Id"
+          },
           "hostname": {
             "anyOf": [
               {
@@ -9332,6 +9343,28 @@
               }
             ],
             "title": "Hostname"
+          },
+          "a": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "A"
+          },
+          "z": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Z"
           },
           "device_id": {
             "anyOf": [
@@ -9354,6 +9387,39 @@
               }
             ],
             "title": "Epif Request Id"
+          },
+          "connection_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection Id"
+          },
+          "cable_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cable Id"
+          },
+          "cable_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cable Label"
           },
           "reasons": {
             "items": {
@@ -13328,7 +13394,20 @@
                 "type": "null"
               }
             ],
-            "title": "Epif Id"
+            "title": "Epif Id",
+            "description": "ePIF rows: the ePIF ID"
+          },
+          "matrix_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Matrix Id",
+            "description": "Cable-matrix rows: the ID column (-> cables.external_id)"
           },
           "action": {
             "anyOf": [
@@ -13350,7 +13429,8 @@
                 "type": "null"
               }
             ],
-            "title": "Hostname"
+            "title": "Hostname",
+            "description": "ePIF: Name; cable matrix: A Name"
           },
           "row": {
             "anyOf": [
@@ -13385,6 +13465,52 @@
             ],
             "title": "Ru"
           },
+          "a": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "A",
+            "description": "Cable matrix: 'host:slot/port' as written for the A end"
+          },
+          "z": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Z",
+            "description": "Cable matrix: the Z end"
+          },
+          "trail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trail"
+          },
+          "cable_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cable Label"
+          },
           "cells": {
             "additionalProperties": {
               "type": "string"
@@ -13414,6 +13540,28 @@
               }
             ],
             "title": "Epif Request Id"
+          },
+          "connection_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection Id"
+          },
+          "cable_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cable Id"
           }
         },
         "type": "object",
@@ -13423,14 +13571,21 @@
           "result",
           "messages",
           "epif_id",
+          "matrix_id",
           "action",
           "hostname",
           "row",
           "rack",
           "ru",
+          "a",
+          "z",
+          "trail",
+          "cable_label",
           "cells",
           "device_id",
-          "epif_request_id"
+          "epif_request_id",
+          "connection_id",
+          "cable_id"
         ],
         "title": "ImportRow"
       },
@@ -13626,6 +13781,11 @@
             "type": "integer",
             "title": "Device Count",
             "description": "Live devices with project_id = this job"
+          },
+          "connection_count": {
+            "type": "integer",
+            "title": "Connection Count",
+            "description": "Non-removed connections whose cable belongs to this job (cables.project_id; cable-matrix import)"
           }
         },
         "type": "object",
@@ -13651,7 +13811,8 @@
           "days_since_closed",
           "unresolved_count",
           "deferred_count",
-          "device_count"
+          "device_count",
+          "connection_count"
         ],
         "title": "Job"
       },
@@ -13901,6 +14062,11 @@
             "title": "Device Count",
             "description": "Live devices with project_id = this job"
           },
+          "connection_count": {
+            "type": "integer",
+            "title": "Connection Count",
+            "description": "Non-removed connections whose cable belongs to this job (cables.project_id; cable-matrix import)"
+          },
           "unresolved_by_type": {
             "additionalProperties": {
               "type": "integer"
@@ -13933,6 +14099,7 @@
           "unresolved_count",
           "deferred_count",
           "device_count",
+          "connection_count",
           "unresolved_by_type"
         ],
         "title": "JobDetail"
@@ -14589,7 +14756,19 @@
               }
             ],
             "title": "Cable Label",
-            "description": "Joined from the cable (not stored)"
+            "description": "Joined from the cable, or the connection's cable (not stored)"
+          },
+          "cable_trail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cable Trail",
+            "description": "Joined like cable_label (not stored)"
           },
           "created_at": {
             "type": "string",
@@ -14669,6 +14848,7 @@
           "filename",
           "hostname",
           "cable_label",
+          "cable_trail",
           "created_at",
           "created_by",
           "deferred_at",
@@ -17094,6 +17274,18 @@
               }
             ],
             "title": "Target Field"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target",
+            "description": "Cable matrix: 'cable' when the item points at the cable instead of the connection"
           }
         },
         "type": "object",
