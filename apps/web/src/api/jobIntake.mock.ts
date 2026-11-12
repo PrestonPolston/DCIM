@@ -696,7 +696,11 @@ export function createMockJobIntakeApi(): JobIntakeApi {
     async stageImport(jobId, kind, file) {
       const job = getJobOrThrow(jobId)
       if (!file.name.toLowerCase().endsWith('.csv')) throwApi(422, 'validation', 'Upload a .csv file.')
-      if (file.size > JOB_INTAKE_MAX_FILE_BYTES) throwApi(422, 'validation', 'This file is larger than 8 MiB.')
+      if (file.size > JOB_INTAKE_MAX_FILE_BYTES) throwApi(422, 'validation', 'This file is larger than 5 MiB.')
+      // Mirror the live API's 413 string detail so the wizard can show the server's own message.
+      if (file.name === 'too-big.csv') {
+        throw new ApiError(413, 'CSV is larger than 5242880 bytes', { detail: 'CSV is larger than 5242880 bytes' })
+      }
       const text = await file.text()
       const { headers, rows } = parseCsv(text)
       const forbidden = headers.filter((h) => FORBIDDEN.test(h))

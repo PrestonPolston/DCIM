@@ -145,7 +145,7 @@ function FileSlot({
       ) : skipped ? (
         <p className="hint" role="status">Skipped. The {itemTypeLabel(kind === 'epif' ? 'epif_not_uploaded' : 'cable_matrix_not_uploaded')} item created with this job will stay open.</p>
       ) : (
-        <p className="hint">.csv only, 8 MiB max. Skipping is allowed.</p>
+        <p className="hint">.csv only, 5 MiB max. Skipping is allowed.</p>
       )}
       <label className="field">
         <span className="visually-hidden">{label} CSV</span>
@@ -235,7 +235,7 @@ export default function JobIntakePage() {
 
   function checkFile(file: File): string | null {
     if (!file.name.toLowerCase().endsWith('.csv')) return 'Upload a .csv file.'
-    if (file.size > JOB_INTAKE_MAX_FILE_BYTES) return 'This file is larger than 8 MiB.'
+    if (file.size > JOB_INTAKE_MAX_FILE_BYTES) return 'This file is larger than 5 MiB.'
     return null
   }
 

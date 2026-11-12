@@ -43,7 +43,7 @@ export function jobFillAvailable(): boolean {
 export const DCREQ_PATTERN = /^DCREQ000[0-9]{4}$/
 export const DCREQ_HINT = 'DCREQ000 + 4 digits'
 export const JOB_OVERDUE_DAYS = 30
-export const JOB_INTAKE_MAX_FILE_BYTES = 8 * 1024 * 1024
+export const JOB_INTAKE_MAX_FILE_BYTES = 5 * 1024 * 1024
 
 export type JobStatus = 'open' | 'closed'
 export type ImportKind = 'epif' | 'cable_matrix'

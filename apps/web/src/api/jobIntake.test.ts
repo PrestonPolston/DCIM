@@ -12,6 +12,7 @@ import {
   isJobOverdue,
   isValidDcreq,
   closeOpenItemsWarning,
+  JOB_INTAKE_MAX_FILE_BYTES,
   cableTrail,
   countLabel,
   devicePageHref,
@@ -417,5 +418,19 @@ describe('job text fields', () => {
     const resolved = await api().resolveItem(ok.id, (await api().listOpenItems(ok.id, 'unresolved')).items[0].id, '-48V DC feed\nsecond')
     expect(resolved.item.note).toMatch(/-48V DC feed/)
     expect(resolved.item.note).toMatch(/second/)
+  })
+})
+
+describe('upload cap', () => {
+  it('matches the API 5 MiB csv_max_bytes cap', () => {
+    expect(JOB_INTAKE_MAX_FILE_BYTES).toBe(5 * 1024 * 1024)
+  })
+
+  it('rejects an oversized file in the mock', async () => {
+    const job = await api().createJob('DCREQ0008030')
+    const file = new File([new Uint8Array(JOB_INTAKE_MAX_FILE_BYTES + 1)], 'big.csv', { type: 'text/csv' })
+    await expect(api().stageImport(job.id, 'epif', file)).rejects.toMatchObject({
+      status: 422, message: 'This file is larger than 5 MiB.',
+    })
   })
 })

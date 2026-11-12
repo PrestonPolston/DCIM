@@ -164,7 +164,26 @@ describe('CSV upload, preview and import result', () => {
     expect(job.device_count).toBe(2)
     expect(job.unresolved_count).toBe(3)
   })
+
+  it('caps uploads at 5 MiB and shows that hint', async () => {
+    const user = userEvent.setup()
+    await startJob(user, 'DCREQ0008020')
+    expect(screen.getByText(/\.csv only, 5 MiB max/)).toBeInTheDocument()
+    const big = new File([new Uint8Array(5 * 1024 * 1024 + 1)], 'big.csv', { type: 'text/csv' })
+    await user.upload(screen.getByLabelText('Space & Power (ePIF) CSV'), big)
+    expect(await screen.findByRole('alert')).toHaveTextContent('This file is larger than 5 MiB.')
+  })
+
+  it("shows the API's own 413 message when the server rejects the file", async () => {
+    const user = userEvent.setup()
+    await startJob(user, 'DCREQ0008021')
+    const file = csv('too-big.csv', 'hostname,result\nleaf-01,ready\n')
+    await user.upload(screen.getByLabelText('Space & Power (ePIF) CSV'), file)
+    expect(await screen.findByRole('alert')).toHaveTextContent('CSV is larger than 5242880 bytes')
+  })
+
 })
+
 
 describe('cable matrix intake', () => {
   it('uploads a cable matrix, previews rows, and lists committed, held and skipped rows after commit', async () => {
