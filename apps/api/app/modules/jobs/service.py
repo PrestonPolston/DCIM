@@ -214,3 +214,39 @@ def reopen_job(session: Session, p: ProjectRow, note: str | None) -> None:
         "status": "open", "opened_at": iso_z(p.opened_at), "note": note, "change_set_id": cs.id})
     session.commit()
     session.refresh(p)
+
+
+# ---- slice 2: open-item actions (JOB_INTAKE.md §3) ----
+ITEM_ACTIONS = {"defer": ("open",), "undefer": ("deferred",), "dismiss": UNRESOLVED, "resolve": UNRESOLVED}
+
+
+def item_action(session: Session, p: ProjectRow, item_id: int, action: str, note: str | None) -> Item:
+    item = session.get(Item, item_id)
+    if item is None or item.project_id != p.id:
+        raise err(404, "open_item_not_found", "Open item not found on this job")
+    if item.status not in UNRESOLVED:
+        raise err(409, "open_item_closed", f"This item is already {item.status}", status=item.status)
+    if item.status not in ITEM_ACTIONS[action]:
+        raise err(409, "open_item_state", f"Can't {action} an item that is {item.status}", status=item.status)
+    note = (note or "").strip() or None
+    if action == "dismiss" and note is None:
+        raise err(422, "note_required", "Say why this item is dismissed", field="note")
+    before = {"status": item.status, "note": item.note}
+    who, now = actor(session), utcnow()
+    if action == "defer":
+        item.status, item.deferred_at, item.deferred_by = "deferred", now, who
+    elif action == "undefer":
+        item.status, item.deferred_at, item.deferred_by = "open", None, None
+    else:
+        item.status = "dismissed" if action == "dismiss" else "resolved"
+        item.resolved_at, item.resolved_by = now, who
+        item.deferred_at, item.deferred_by = None, None  # ck_job_open_items_deferred: only while deferred
+    if note:
+        label = {"defer": "Deferred", "undefer": "Reopened", "dismiss": "Dismissed", "resolve": "Resolved"}[action]
+        item.note = f"{item.note}\n{label}: {note}" if item.note else f"{label}: {note}"
+    cs = new_change_set(session, "api", note=f"job {p.id} item {item.id} {action}")
+    session.add(item)
+    record_audit(session, None, f"job_open_item.{action}", "job_open_item", item.id, before=before,
+                 after={"status": item.status, "note": item.note, "change_set_id": cs.id})
+    session.commit()
+    return item

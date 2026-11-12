@@ -78,12 +78,14 @@ class OpenItem(BaseModel):
     target_field: str | None
     note: str | None
     source: Literal["epif", "cable_matrix", "manual"]
+    epif_request_id: int | None
     device_id: int | None
     connection_id: int | None
     cable_id: int | None
     import_row_id: int | None
     filename: str | None = Field(description="Joined from the import batch (not stored)")
-    hostname: str | None = Field(description="Joined from the device (not stored)")
+    hostname: str | None = Field(description="Joined from the device, else the ePIF request's requested name "
+                                                        "(not stored)")
     cable_label: str | None = Field(description="Joined from the cable (not stored)")
     created_at: str
     created_by: str | None
@@ -91,3 +93,108 @@ class OpenItem(BaseModel):
     deferred_by: str | None
     resolved_at: str | None
     resolved_by: str | None
+
+
+# ---- slice 2: imports + open-item actions ----
+ImportKind = Literal["epif", "cable_matrix"]
+RowResult = Literal["ready", "warning", "held", "conflict", "committed", "skipped"]
+
+
+class RowMessage(BaseModel):
+    code: str
+    field: str | None
+    message: str
+    level: Literal["conflict", "held", "warning", "info"] = Field(
+        description="conflict = row skipped; held = request kept, no device; warning = written + fill-later item")
+    item_type: str | None = Field(None, description="Open item this message becomes on commit (if any)")
+    target_field: str | None = None
+
+
+class ImportRow(BaseModel):
+    id: int
+    row_number: int = Field(description="1-based data row (header excluded)")
+    result: RowResult
+    messages: list[RowMessage]
+    epif_id: str | None
+    action: str | None
+    hostname: str | None
+    row: str | None
+    rack: str | None
+    ru: str | None
+    cells: dict[str, str] = Field(description="The staged row by canonical column (secrets are never staged)")
+    device_id: int | None
+    epif_request_id: int | None
+
+
+class ImportCounts(BaseModel):
+    total: int
+    ready: int
+    warning: int
+    held: int
+    conflict: int
+    committed: int
+    skipped: int
+
+
+class JobImport(BaseModel):
+    id: int
+    job_id: int
+    dcreq: str
+    kind: ImportKind
+    filename: str | None
+    sha256: str
+    status: Literal["review", "committed", "abandoned"]
+    uploaded_at: str
+    uploaded_by: str | None
+    change_set_id: int | None
+    counts: ImportCounts
+    reupload: Literal["review", "committed"] | None = Field(
+        None, description="Set when the same file (sha256) was already uploaded to this job: 'review' = the "
+                          "batch was re-validated in place; 'committed' = nothing new was staged")
+
+
+class JobImportDetail(JobImport):
+    rows: list[ImportRow]
+
+
+class CommitRow(BaseModel):
+    import_id: int
+    kind: ImportKind
+    row_number: int
+    epif_id: str | None
+    hostname: str | None
+    device_id: int | None = None
+    epif_request_id: int | None = None
+    reasons: list[RowMessage] = []
+
+
+class CommitWarning(BaseModel):
+    code: str
+    message: str
+    field: str | None
+    item_type: str | None
+    target_field: str | None
+    import_id: int
+    row_number: int
+    hostname: str | None
+
+
+class CommitResult(BaseModel):
+    job: JobDetail
+    imports: list[JobImport]
+    committed: list[CommitRow]
+    held: list[CommitRow]
+    skipped: list[CommitRow] = Field(description="Conflict rows, not written; each has its reasons")
+    warnings: list[CommitWarning]
+    open_items_created: list[int]
+    open_item_count: int = Field(description="The job's unresolved (open + deferred) items after the commit")
+    resolved_item_ids: list[int] = Field(description="Items auto-resolved (e.g. epif_not_uploaded)")
+
+
+class ItemNote(InputModel):
+    note: str | None = Field(None, max_length=2000)
+
+
+class OpenItemResult(BaseModel):
+    item: OpenItem
+    job: JobDetail
