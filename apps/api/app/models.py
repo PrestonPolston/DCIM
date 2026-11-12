@@ -17,3 +17,4 @@ from app.modules.connections.models import CableRow, ConnectionRow, DevicePortRo
 from app.modules.images.models import ProfileImageRow  # noqa: F401,E402
 from app.modules.devices.slots import DeviceRuSlotRow  # noqa: F401,E402  (P1-10; also registers the slot sync hook)
 from app.modules.cabinet_profiles.models import CabinetProfileImageRow, CabinetProfileRow  # noqa: F401,E402
+from app.modules.jobs.models import ImportRowRow, JobImportRow, JobOpenItemRow  # noqa: F401,E402

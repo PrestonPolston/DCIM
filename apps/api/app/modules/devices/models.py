@@ -45,6 +45,9 @@ class DeviceRow(TimestampMixin, SoftDeleteMixin, table=True):
             "uq_devices_rack_id_host_name", "rack_id", text("lower(host_name)"), unique=True,
             sqlite_where=text(HOSTNAME_SCOPE), postgresql_where=text(HOSTNAME_SCOPE),
         ),
+        # p1_31 (job intake): per-job device counts by status; recently-updated lists
+        Index("ix_devices_project_id_status", "project_id", "status"),
+        Index("ix_devices_updated_at", "updated_at"),
     )
 
     id: int | None = Field(default=None, primary_key=True)

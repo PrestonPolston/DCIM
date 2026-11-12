@@ -79,7 +79,7 @@ def delete_reference(project_id: int, ref_id: int, session: Session = Depends(ge
 @router.get("/project-references", response_model=list[Reference])
 def find_references(kind: str = Query(..., max_length=8), ref: str = Query(..., max_length=64),
                     session: Session = Depends(get_session)):
-    return session.exec(select(ProjectReferenceRow).join(ProjectRow)
+    return session.exec(select(ProjectReferenceRow).join(ProjectRow, ProjectRow.id == ProjectReferenceRow.project_id)
                         .where(ProjectReferenceRow.kind == kind.upper(), ProjectReferenceRow.ref == ref,
                                ProjectRow.deleted_at.is_(None))).all()
 
