@@ -753,4 +753,6 @@ button.link, .link {
 .job-local-note { margin: 0; }
 /* User- or API-supplied text: literal characters; tabs and newlines kept (not pre-line, which collapses tabs). */
 .user-text, .job-item-note { margin: 0; white-space: pre-wrap; }
+.job-intake-devices { margin: 0.25rem 0 1rem; padding-left: 1.25rem; }
+.job-intake-devices li { margin: 0; }
 .job-queue-item textarea { width: 100%; min-height: 4.5rem; }

@@ -155,6 +155,10 @@ describe('CSV upload, preview and import result', () => {
     const result = await screen.findByRole('region', { name: 'Import result' })
     expect(result).toHaveTextContent('Import result · DCREQ0003333')
     expect(result).toHaveTextContent('No RU.')
+    expect(result).toHaveTextContent(/2 devices/)
+    const devices = within(result).getByRole('list', { name: 'Committed devices' })
+    expect(within(devices).getByRole('link', { name: 'srv-ready' })).toHaveAttribute('href', '/devices?q=srv-ready')
+    expect(within(devices).getByRole('link', { name: 'srv-warn' })).toHaveAttribute('href', '/devices?q=srv-warn')
     expect(within(result).getByRole('table', { name: 'Skipped conflict rows' })).toHaveTextContent('CONFLICT-01')
     const queue = within(result).getByRole('list', { name: 'Fill-later queue' })
     expect(queue).toHaveTextContent('srv-warn')
@@ -163,6 +167,27 @@ describe('CSV upload, preview and import result', () => {
     const job = await jobIntakeApi().getJob('DCREQ0003333')
     expect(job.device_count).toBe(2)
     expect(job.unresolved_count).toBe(3)
+  })
+
+  it('shows a held ePIF hostname in the Held table with A/Z as n/a', async () => {
+    const user = userEvent.setup()
+    await startJob(user, 'DCREQ0003334')
+    const heldEpif = `hostname,result
+srv-ready,ready
+ghost-host,held
+`
+    await user.upload(screen.getByLabelText('Space & Power (ePIF) CSV'), csv('epif.csv', heldEpif))
+    expect(await screen.findByRole('status')).toHaveTextContent('epif.csv: 2 rows')
+    await user.click(screen.getByRole('button', { name: 'Next: Cable matrix' }))
+    await user.click(screen.getByRole('button', { name: 'Skip cable matrix' }))
+    await user.click(screen.getByRole('button', { name: 'Next: Preview' }))
+    await user.click(screen.getByRole('button', { name: /Commit job/ }))
+    const result = await screen.findByRole('region', { name: 'Import result' })
+    const heldTable = within(result).getByRole('table', { name: 'Held rows' })
+    expect(heldTable).toHaveTextContent('ghost-host')
+    expect(heldTable).toHaveTextContent('n/a')
+    expect(heldTable.textContent).not.toMatch(/—/)
+    expect(within(result).getByRole('link', { name: 'srv-ready' })).toHaveAttribute('href', '/devices?q=srv-ready')
   })
 
   it('caps uploads at 5 MiB and shows that hint', async () => {

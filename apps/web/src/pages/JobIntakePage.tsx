@@ -8,6 +8,7 @@ import {
   itemTypeLabel,
   cableTrail,
   countLabel,
+  devicePageHref,
   jobCableImportsAvailable,
   jobHref,
   jobImportsAvailable,
@@ -82,12 +83,22 @@ function CableRowsTable({ rows, caption }: { rows: ImportRow[]; caption: string 
   )
 }
 
+function rowHost(row: CommitRow | SkippedConflictRow): string | null {
+  return row.hostname ?? (('epif_id' in row ? row.epif_id : null) ?? null)
+}
+
+function isEpifRow(row: CommitRow | SkippedConflictRow): boolean {
+  return row.kind === 'epif'
+}
+
 function CommitRowsTable({ rows, caption, kind }: { rows: Array<CommitRow | SkippedConflictRow>; caption: string; kind: 'committed' | 'held' | 'skipped' }) {
+  const showHost = kind === 'held' || rows.some((r) => isEpifRow(r) || (!r.a && !r.z && rowHost(r)))
   return (
     <table className="table" aria-label={caption}>
       <thead>
         <tr>
           <th>Row</th>
+          {showHost ? <th>Host</th> : null}
           <th>A</th>
           <th>Z</th>
           {kind === 'committed' ? <th>Label</th> : <th>Reason</th>}
@@ -96,11 +107,18 @@ function CommitRowsTable({ rows, caption, kind }: { rows: Array<CommitRow | Skip
       <tbody>
         {rows.map((row) => {
           const messages = 'messages' in row ? row.messages : row.reasons
+          const end = (value: string | null | undefined) => {
+            if (value) return value
+            if (isEpifRow(row) || (!row.a && !row.z && rowHost(row))) return 'n/a'
+            if (kind === 'skipped' && !row.z && !showHost) return row.hostname ?? '—'
+            return '—'
+          }
           return (
             <tr key={`${row.import_id}-${row.row_number}`}>
               <td>{row.row_number}</td>
-              <td className="mono">{row.a ?? (kind === 'skipped' && !row.z ? (row.hostname ?? '—') : '—')}</td>
-              <td className="mono">{row.z ?? '—'}</td>
+              {showHost ? <td className="mono">{rowHost(row) ?? '—'}</td> : null}
+              <td className="mono">{end(row.a)}</td>
+              <td className="mono">{end(row.z)}</td>
               <td className="user-text">
                 {kind === 'committed'
                   ? (('cable_label' in row ? row.cable_label : null) ?? ('label' in row ? row.label : null) ?? '—')
@@ -562,6 +580,19 @@ export default function JobIntakePage() {
           <p role="status">
             Job is {result.job.status}. {countLabel(result.job.device_count, 'device')} · {countLabel(result.job.connection_count ?? 0, 'connection')} · {result.open_item_count} in the fill-later queue.
           </p>
+          {result.committed.filter((r) => r.kind === 'epif').length > 0 && (
+            <ul className="job-intake-devices" aria-label="Committed devices">
+              {result.committed.filter((r) => r.kind === 'epif').map((row) => {
+                const name = row.hostname ?? row.epif_id ?? `Row ${row.row_number}`
+                const href = devicePageHref({ device_id: row.device_id ?? null, hostname: row.hostname ?? null })
+                return (
+                  <li key={`${row.import_id}-${row.row_number}`}>
+                    {href ? <Link className="mono" to={href}>{name}</Link> : <span className="mono">{name}</span>}
+                  </li>
+                )
+              })}
+            </ul>
+          )}
 
           <h3>Warnings</h3>
           {result.warnings.length === 0 ? <p className="hint">No warnings.</p> : (

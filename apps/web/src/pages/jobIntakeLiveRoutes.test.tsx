@@ -334,7 +334,14 @@ function installSlice2JobsApi() {
         const pos = addFieldItem(job, 'nopos')
         createdIds.push(pos.id)
         job.device_count = (job.device_count ?? 0) + 1
-        committed.push({ import_id: epifBatches[0].id, kind: 'epif', row_number: 1, hostname: 'web01', reasons: [] })
+        committed.push({ import_id: epifBatches[0].id, kind: 'epif', row_number: 1, hostname: 'web01', device_id: 101, reasons: [] })
+        held.push({
+          import_id: epifBatches[0].id,
+          kind: 'epif',
+          row_number: 5,
+          hostname: 'ghost-host',
+          reasons: [{ code: 'missing_hostname', field: null, message: 'A or Z end could not be resolved.', level: 'held' }],
+        })
         skipped.push({
           import_id: epifBatches[0].id,
           kind: 'epif',
@@ -634,6 +641,11 @@ describe('job intake live slice 2 routes (mocked fetch)', () => {
     expect(skipped).toHaveTextContent('Hostname already used.')
     expect(result.textContent).toMatch(/1 device ·/)
     expect(result.textContent).not.toMatch(/1 devices/)
+    const devices = within(result).getByRole('list', { name: 'Committed devices' })
+    expect(within(devices).getByRole('link', { name: 'web01' })).toHaveAttribute('href', '/devices?q=web01')
+    const heldTable = within(result).getByRole('table', { name: 'Held rows' })
+    expect(heldTable).toHaveTextContent('ghost-host')
+    expect(heldTable).toHaveTextContent('n/a')
     expect(result).toHaveTextContent('Missing PDU')
     expect(result).toHaveTextContent('Missing position')
     expect(result.textContent).not.toMatch(/\(pdu_missing\)/)

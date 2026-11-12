@@ -42,12 +42,13 @@ type Store = {
   nextItem: number
   nextConnection: number
   nextCable: number
+  nextDevice: number
 }
 
 let store: Store = empty()
 
 function empty(): Store {
-  return { jobs: [], imports: [], skipped: [], items: [], nextJob: 1, nextRef: 1, nextImport: 1, nextRow: 1, nextItem: 1, nextConnection: 1, nextCable: 1 }
+  return { jobs: [], imports: [], skipped: [], items: [], nextJob: 1, nextRef: 1, nextImport: 1, nextRow: 1, nextItem: 1, nextConnection: 1, nextCable: 1, nextDevice: 1 }
 }
 
 function iso(ms = Date.now()): string {
@@ -537,14 +538,18 @@ function finalizeCommit(job: Job, batches: JobImport[]): IntakeCommitResult {
         continue
       }
       if (row.result === 'ready' || row.result === 'warning') {
-        if (batch.kind === 'epif') job.device_count += 1
+        const extra: Partial<CommitRow> = {}
+        if (batch.kind === 'epif') {
+          job.device_count += 1
+          extra.device_id = store.nextDevice++
+        }
         if (batch.kind === 'cable_matrix') {
           job.connection_count = (job.connection_count ?? 0) + 1
           row.cable_id = store.nextCable++
           row.connection_id = store.nextConnection++
         }
         row.result = 'committed'
-        committed.push(commitRowOf(batch, row))
+        committed.push(commitRowOf(batch, row, extra))
         if (row.messages.length) {
           for (const msg of row.messages) {
             if (msg.level === 'info') continue
