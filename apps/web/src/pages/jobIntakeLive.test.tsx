@@ -250,9 +250,9 @@ describe('job intake live flag (mocked fetch)', () => {
     live.seedJob('DCREQ0001234', 'Leaf refresh')
     renderWithProviders(<App />, '/jobs/DCREQ0001234')
     await screen.findByRole('heading', { name: 'DCREQ0001234' })
-    expect(screen.getByRole('note')).toHaveTextContent('Completing items arrives with the next API update.')
+    expect(screen.getByRole('note')).toHaveTextContent('Complete, Fill, Hold and Dismiss arrive with the next API update.')
     await screen.findByRole('region', { name: 'ePIF not uploaded' })
-    const actions = ['Complete', 'Fill', 'Hold', 'Dismiss']
+    const actions = ['Complete', 'Resolve with note', 'Hold', 'Dismiss']
     for (const name of actions) {
       const buttons = screen.getAllByRole('button', { name })
       expect(buttons.length).toBeGreaterThan(0)
