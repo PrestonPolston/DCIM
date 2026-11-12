@@ -8,8 +8,8 @@ import { parseApiDate } from '../lib/apiDate'
 import { createMockJobIntakeApi } from './jobIntake.mock'
 
 export const JOB_INTAKE_API = {
-  /** true = real /jobs endpoints; false = in-memory mock (tests set this; see src/test/setup.ts). */
-  live: true,
+  /** true = real /jobs endpoints; false = in-memory mock (tests and VITE_JOB_INTAKE_LIVE=false). */
+  live: import.meta.env.VITE_JOB_INTAKE_LIVE !== 'false',
 }
 
 export const DCREQ_PATTERN = /^DCREQ000[0-9]{4}$/

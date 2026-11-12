@@ -19,6 +19,7 @@ async function runImport(text: string, dryRun: boolean): Promise<ImportResult> {
 
 export default function ImportPage() {
   const canImport = useCan('device.import')
+  const canStartJob = useCan('job.write')
   const [file, setFile] = useState<File | null>(null)
   const [text, setText] = useState('')
   const [result, setResult] = useState<ImportResult | null>(null)
@@ -47,6 +48,9 @@ export default function ImportPage() {
   return (
     <section>
       <div className="page-header"><h1>CSV import</h1></div>
+      {canStartJob && (
+        <p className="job-intake-entry">Starting a DCREQ job with an ePIF and cable matrix? <Link to="/jobs/new">New job</Link></p>
+      )}
       <ol className="stepper" aria-label="Import steps">
         {STEPS.map((s, i) => <li key={s} aria-current={i === step ? 'step' : undefined}>{i + 1}. {s}</li>)}
       </ol>

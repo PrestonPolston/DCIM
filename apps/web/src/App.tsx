@@ -12,6 +12,8 @@ import SearchPage from './pages/SearchPage'
 import HallPage from './pages/HallPage'
 import HomePage from './pages/HomePage'
 import ImportPage from './pages/ImportPage'
+import JobIntakePage from './pages/JobIntakePage'
+import JobPage from './pages/JobPage'
 import ReportsPage from './pages/ReportsPage'
 import NotFoundPage from './pages/NotFoundPage'
 
@@ -38,6 +40,8 @@ export default function App() {
         <Route path="profiles/cabinet/:id" element={<CabinetProfilePage />} />
         <Route path="reports" element={<ReportsPage />} />
         <Route path="import" element={<ImportPage />} />
+        <Route path="jobs/new" element={<JobIntakePage />} />
+        <Route path="jobs/:idOrDcreq" element={<JobPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>

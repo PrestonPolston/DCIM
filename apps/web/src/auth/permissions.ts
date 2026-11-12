@@ -9,11 +9,12 @@ export type Action =
   | 'profile.publish' // publish, retire, new version, delete (admin)
   | 'rack.move'
   | 'cabinetProfile.write' // create, edit, publish, retire, un-retire, clone, delete cabinet profiles (admin only, admin-setup.md §1)
+  | 'job.write' // start a job, upload intake files, work the fill-later queue (tech or admin)
   | 'admin' // /users, /audit-events, locations CRUD
 
 const MATRIX: Record<string, Action[]> = {
-  admin: ['device.write', 'device.delete', 'profile.publish', 'device.import', 'device.export', 'deviceType.create', 'rack.move', 'cabinetProfile.write', 'admin'],
-  technician: ['device.write', 'device.import', 'device.export', 'deviceType.create', 'rack.move'],
+  admin: ['device.write', 'device.delete', 'profile.publish', 'device.import', 'device.export', 'deviceType.create', 'rack.move', 'cabinetProfile.write', 'job.write', 'admin'],
+  technician: ['device.write', 'device.import', 'device.export', 'deviceType.create', 'rack.move', 'job.write'],
   'read-only': ['device.export'],
 }
 

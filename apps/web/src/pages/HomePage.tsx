@@ -12,6 +12,7 @@ export default function HomePage() {
   const canFix = useCan('profile.publish')
   const canPlace = useCan('device.write')
   const canAddProfile = useCan('deviceType.create')
+  const canStartJob = useCan('job.write')
   const [params, setParams] = useSearchParams()
   const view = isAdmin && params.get('view') === 'admin' ? 'admin' : 'work'
   const setView = (next: 'work' | 'admin') => {
@@ -49,6 +50,7 @@ export default function HomePage() {
             <div className="home-intro-actions">
               {hallHref ? <Link className="button primary" to={hallHref}>Open hall</Link> : <span className="hint">No data halls yet.</span>}
               {canAddProfile && <Link className="button" to="/profiles?new=1">Add profile</Link>}
+              {canStartJob && <Link className="button" to="/jobs/new">New job</Link>}
             </div>
           </div>
           <ParkedCard title="Jobs open more than 30 days" tile={myWork.jobs} />

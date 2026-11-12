@@ -730,3 +730,12 @@ button.link, .link {
   .home-search { display: block; margin-left: auto; }
   .usermenu { margin-left: var(--space-3); }
 }
+
+/* Job intake wizard */
+.job-intake { display: grid; gap: var(--space-4); }
+.job-intake .card, .job-page .card { display: grid; gap: var(--space-3); }
+.job-intake-duplicate .actions { margin-top: var(--space-3); }
+.job-intake-file { display: grid; gap: var(--space-2); }
+.job-intake-queue { margin: 0; padding-left: 1.25rem; display: grid; gap: var(--space-1); }
+.job-intake-entry { margin: 0 0 var(--space-4); }
+.job-intake table.table { width: 100%; }
