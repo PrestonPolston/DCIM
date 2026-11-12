@@ -38,6 +38,7 @@ export default function Layout() {
           <NavLink to="/devices">Devices</NavLink>
           <NavLink to="/profiles">Profiles</NavLink>
           <NavLink to="/reports">Reports</NavLink>
+          <NavLink to="/jobs">Jobs</NavLink>
           <NavLink to="/import">Import</NavLink>
         </nav>
         <HomeSearch />
@@ -61,6 +62,7 @@ export default function Layout() {
           <NavLink to="/devices">Devices</NavLink>
           <NavLink to="/profiles">Profiles</NavLink>
           <NavLink to="/reports">Reports</NavLink>
+          <NavLink to="/jobs">Jobs</NavLink>
           <NavLink to="/import">Import</NavLink>
           {me && <Link to="/account/password">Change password</Link>}
           {me && (

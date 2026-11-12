@@ -739,3 +739,15 @@ button.link, .link {
 .job-intake-queue { margin: 0; padding-left: 1.25rem; display: grid; gap: var(--space-1); }
 .job-intake-entry { margin: 0 0 var(--space-4); }
 .job-intake table.table { width: 100%; }
+
+/* Jobs list and job detail */
+.jobs-page, .job-page { display: grid; gap: var(--space-4); }
+.jobs-page .filters, .job-queue-filters { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: end; }
+.jobs-page .filters .field { min-width: 10rem; }
+.job-overdue { display: inline-block; margin-left: var(--space-2); padding: 0 var(--space-2); border-radius: 999px; background: var(--status-decom-bg); color: var(--text); font-size: var(--fs-sm); font-weight: var(--fw-medium); }
+.job-queue-group { display: grid; gap: var(--space-2); margin: 0 0 var(--space-4); }
+.job-queue-group h3 { margin: 0; }
+.job-queue-item { display: grid; gap: var(--space-1); padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
+.job-queue-item .actions { margin-top: var(--space-2); }
+.job-badge { display: inline-block; margin-left: var(--space-2); padding: 0 var(--space-2); border-radius: 999px; background: var(--surface-2); font-size: var(--fs-sm); }
+.job-local-note { margin: 0; }
