@@ -31,7 +31,7 @@ const COPY: Record<string, string> = {
   import_forbidden_columns: 'This file has forbidden columns. Remove those columns and upload again. Secrets are never stored.',
   unknown_columns: 'This file has unknown columns. Remove them and upload again.',
   job_not_empty: 'This job already has committed work, so it can’t be deleted. Close it instead.',
-  job_has_open_items: 'This job still has unresolved items. Close again to close it anyway.',
+  job_has_open_items: 'This job still has unresolved items. You can close it anyway.',
   job_already_closed: 'This job is already closed.',
   job_already_open: 'This job is already open.',
   job_not_found: 'Job not found.',
@@ -79,6 +79,10 @@ export function friendlyMessage(d: ErrorDetail, status?: number): string | null 
   if ((d.code === 'duplicate_dcreq' || d.code === 'job_exists') && d.existing) {
     const e = d.existing
     return `${e.dcreq} is already a job (${e.name}, ${e.status}). Attaching more work to that job isn’t available yet.`
+  }
+  if (d.code === 'job_has_open_items' && typeof d.unresolved_count === 'number') {
+    const n = d.unresolved_count
+    return `This job still has ${n} unresolved item${n === 1 ? '' : 's'}. You can close it anyway.`
   }
   return d.missing?.length ? `${base} Missing: ${d.missing.join(', ')}.` : base
 }

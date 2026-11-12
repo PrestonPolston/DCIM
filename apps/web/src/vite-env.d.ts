@@ -6,6 +6,8 @@ interface ImportMetaEnv {
   readonly VITE_JOB_INTAKE_LIVE?: string
   /** Set to 'true' when Backend ships open-item write routes. */
   readonly VITE_JOB_INTAKE_ITEM_WRITES?: string
+  /** Set to 'true' when Backend ships CSV import / preview / commit routes. */
+  readonly VITE_JOB_INTAKE_IMPORTS?: string
 }
 
 interface ImportMeta {

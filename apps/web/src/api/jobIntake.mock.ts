@@ -559,5 +559,16 @@ export function createMockJobIntakeApi(): JobIntakeApi {
       item.resolved_by = ACTOR
       return item
     },
+    async fillItem(jobId, itemId, value) {
+      const trimmed = value.trim()
+      if (!trimmed) throwApi(422, 'validation', 'Enter a value to fill this field.')
+      const item = getItem(jobId, itemId)
+      item.filled_value = trimmed
+      item.note = item.target_field ? `${item.target_field}=${trimmed}` : trimmed
+      item.status = 'resolved'
+      item.resolved_at = iso()
+      item.resolved_by = ACTOR
+      return item
+    },
   }
 }

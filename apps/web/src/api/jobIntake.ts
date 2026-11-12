@@ -11,8 +11,20 @@ import { createMockJobIntakeApi } from './jobIntake.mock'
 export const JOB_INTAKE_API = {
   /** true = real /jobs endpoints; false = in-memory mock (tests and VITE_JOB_INTAKE_LIVE=false). */
   live: import.meta.env.VITE_JOB_INTAKE_LIVE !== 'false',
-  /** true = POST defer/undefer/dismiss/resolve. Backend slice 1 has GET only; default is a local overlay. */
+  /** true = POST defer/undefer/dismiss/resolve/fill. Off until Backend ships those routes. */
   openItemWrites: import.meta.env.VITE_JOB_INTAKE_ITEM_WRITES === 'true',
+  /** true = POST /imports, preview, commit. Off until Backend ships those routes. */
+  imports: import.meta.env.VITE_JOB_INTAKE_IMPORTS === 'true',
+}
+
+/** Live API is on, but open-item write routes are not shipped yet. */
+export function jobItemWritesAvailable(): boolean {
+  return !JOB_INTAKE_API.live || JOB_INTAKE_API.openItemWrites
+}
+
+/** Live API is on, but import/preview/commit routes are not shipped yet. */
+export function jobImportsAvailable(): boolean {
+  return !JOB_INTAKE_API.live || JOB_INTAKE_API.imports
 }
 
 export const DCREQ_PATTERN = /^DCREQ000[0-9]{4}$/
@@ -163,6 +175,8 @@ export interface JobOpenItem {
   deferred_by: string | null
   resolved_at: string | null
   resolved_by: string | null
+  /** Mock Fill: the value written to target_field before resolve. */
+  filled_value?: string | null
 }
 
 export interface IntakePreview {
@@ -218,6 +232,8 @@ export interface JobIntakeApi {
   undeferItem(jobId: number, itemId: number): Promise<JobOpenItem>
   dismissItem(jobId: number, itemId: number, note: string): Promise<JobOpenItem>
   resolveItem(jobId: number, itemId: number): Promise<JobOpenItem>
+  /** Write a value for target_field, then mark the item resolved (mock; live when writes ship). */
+  fillItem(jobId: number, itemId: number, value: string): Promise<JobOpenItem>
 }
 
 /** Trim, strip spaces, uppercase; rebuild a paste of the full id, 000XXXX, or the last 4 digits. */
@@ -269,11 +285,13 @@ export function isJobHasOpenItems(e: unknown): e is ApiError {
 
 export function closeOpenItemsWarning(e: unknown): CloseWarning | null {
   if (!isJobHasOpenItems(e)) return null
-  const d = errorDetail(e.detail)
+  const d = errorDetail(e.detail) ?? { code: 'job_has_open_items' }
+  const count = d.unresolved_count ?? 0
   return {
     code: 'job_has_open_items',
-    message: d?.message ?? e.message,
-    unresolved_count: d?.unresolved_count ?? 0,
+    message: friendlyMessage({ ...d, code: 'job_has_open_items', unresolved_count: count }, 409)
+      ?? 'This job still has unresolved items. You can close it anyway.',
+    unresolved_count: count,
   }
 }
 
@@ -283,8 +301,37 @@ export function matchesOpenItemFilter(status: OpenItemStatus, filter: OpenItemLi
   return status === filter
 }
 
+const ITEM_TYPE_LABELS: Record<string, string> = {
+  missing_hostname: 'Missing hostname',
+  missing_profile: 'Missing profile',
+  profile_not_usable: 'Profile not usable',
+  unresolved_cabinet: 'Unresolved cabinet',
+  missing_position: 'Missing position',
+  missing_serial: 'Missing serial',
+  missing_psu: 'Missing PSU',
+  psu_unparsed: 'PSU not parsed',
+  pdu_missing: 'Missing PDU',
+  missing_port: 'Missing port',
+  unresolved_hop: 'Unresolved hop',
+  missing_cable_label: 'Missing cable label',
+  missing_trail: 'Missing trail',
+  epif_not_uploaded: 'ePIF not uploaded',
+  cable_matrix_not_uploaded: 'Cable matrix not uploaded',
+  space_power_flag: 'Space and power flag',
+  media_missing: 'Missing media',
+  ip_missing: 'Missing IP',
+  other: 'Other',
+}
+
+export function itemTypeLabel(type: string): string {
+  if (ITEM_TYPE_LABELS[type]) return ITEM_TYPE_LABELS[type]
+  const spaced = type.replaceAll('_', ' ')
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1)
+}
+
+/** @deprecated use itemTypeLabel */
 export function humanizeItemType(type: string): string {
-  return type.replaceAll('_', ' ')
+  return itemTypeLabel(type)
 }
 
 export function duplicateExisting(e: unknown): ExistingJobRef | null {
@@ -359,6 +406,8 @@ function liveApi(): JobIntakeApi {
       request<JobOpenItem>(`/jobs/${jobId}/open-items/${itemId}/dismiss`, { method: 'POST', body: JSON.stringify({ note }) }),
     resolveItem: (jobId, itemId) =>
       request<JobOpenItem>(`/jobs/${jobId}/open-items/${itemId}/resolve`, { method: 'POST' }),
+    fillItem: (jobId, itemId, value) =>
+      request<JobOpenItem>(`/jobs/${jobId}/open-items/${itemId}/fill`, { method: 'POST', body: JSON.stringify({ value }) }),
   }
 }
 
@@ -366,84 +415,8 @@ let mock = createMockJobIntakeApi()
 
 export function resetJobIntakeMock(): void {
   mock = createMockJobIntakeApi()
-  resetOpenItemOverlay()
-}
-
-const itemOverlay = new Map<string, JobOpenItem>()
-
-export function resetOpenItemOverlay(): void {
-  itemOverlay.clear()
-}
-
-function overlayKey(jobId: number, itemId: number) {
-  return `${jobId}:${itemId}`
-}
-
-function withLocalItemWrites(base: JobIntakeApi, actor = 'local'): JobIntakeApi {
-  const stamp = () => new Date().toISOString()
-  const overlayOf = (jobId: number, item: JobOpenItem) => itemOverlay.get(overlayKey(jobId, item.id)) ?? item
-  async function sourceItem(jobId: number, itemId: number): Promise<JobOpenItem> {
-    const hit = itemOverlay.get(overlayKey(jobId, itemId))
-    if (hit) return hit
-    const page = await base.listOpenItems(jobId, 'all')
-    const found = page.items.find((i) => i.id === itemId)
-    if (!found) {
-      throw new ApiError(404, 'Open item not found', { detail: { code: 'not_found', message: 'Open item not found' } })
-    }
-    return found
-  }
-  function save(jobId: number, item: JobOpenItem) {
-    itemOverlay.set(overlayKey(jobId, item.id), item)
-    return item
-  }
-  return {
-    ...base,
-    async listOpenItems(jobId, status = 'unresolved') {
-      const page = await base.listOpenItems(jobId, 'all')
-      const byId = new Map(page.items.map((i) => [i.id, overlayOf(jobId, i)]))
-      for (const [key, item] of itemOverlay) {
-        if (item.job_id === jobId || key.startsWith(`${jobId}:`)) byId.set(item.id, item)
-      }
-      const items = [...byId.values()].filter((i) => matchesOpenItemFilter(i.status, status))
-      return { items, total: items.length }
-    },
-    async deferItem(jobId, itemId, note = null) {
-      const item = await sourceItem(jobId, itemId)
-      return save(jobId, {
-        ...item,
-        status: 'deferred',
-        note: note != null ? note : item.note,
-        deferred_at: stamp(),
-        deferred_by: actor,
-      })
-    },
-    async undeferItem(jobId, itemId) {
-      const item = await sourceItem(jobId, itemId)
-      return save(jobId, { ...item, status: 'open', deferred_at: null, deferred_by: null })
-    },
-    async dismissItem(jobId, itemId, note) {
-      if (!note || !note.trim()) {
-        throw new ApiError(422, 'A note is required to dismiss an item.', { detail: { code: 'validation', message: 'A note is required to dismiss an item.' } })
-      }
-      const item = await sourceItem(jobId, itemId)
-      return save(jobId, {
-        ...item,
-        status: 'dismissed',
-        note,
-        resolved_at: stamp(),
-        resolved_by: actor,
-      })
-    },
-    async resolveItem(jobId, itemId) {
-      const item = await sourceItem(jobId, itemId)
-      return save(jobId, { ...item, status: 'resolved', resolved_at: stamp(), resolved_by: actor })
-    },
-  }
 }
 
 export function jobIntakeApi(): JobIntakeApi {
-  if (!JOB_INTAKE_API.live) return mock
-  const live = liveApi()
-  return JOB_INTAKE_API.openItemWrites ? live : withLocalItemWrites(live)
+  return JOB_INTAKE_API.live ? liveApi() : mock
 }
-

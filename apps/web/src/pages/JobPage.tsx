@@ -1,14 +1,14 @@
 import { useState } from 'react'
-import { Link, useParams } from 'react-router'
+import { Link, useParams, useSearchParams } from 'react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError } from '../api/client'
 import {
-  JOB_INTAKE_API,
   closeOpenItemsWarning,
-  humanizeItemType,
   isJobHasOpenItems,
   isJobOverdue,
+  itemTypeLabel,
   jobIntakeApi,
+  jobItemWritesAvailable,
   type CloseWarning,
   type JobOpenItem,
   type OpenItemListStatus,
@@ -23,6 +23,8 @@ const FILTERS: { id: OpenItemListStatus; label: string }[] = [
   { id: 'dismissed', label: 'Dismissed' },
   { id: 'all', label: 'All' },
 ]
+
+const WRITES_PENDING_NOTE = 'Completing items arrives with the next API update.'
 
 function groupByType(items: JobOpenItem[]): [string, JobOpenItem[]][] {
   const order: string[] = []
@@ -39,14 +41,19 @@ function groupByType(items: JobOpenItem[]): [string, JobOpenItem[]][] {
 
 export default function JobPage() {
   const { idOrDcreq = '' } = useParams()
+  const [params] = useSearchParams()
+  const justCreated = params.get('created') === '1'
   const canWrite = useCan('job.write')
-  const canTrack = useCan('job.track')
+  const writesAvailable = jobItemWritesAvailable()
+  const canAct = canWrite && writesAvailable
   const qc = useQueryClient()
   const [filter, setFilter] = useState<OpenItemListStatus>('unresolved')
   const [closeWarning, setCloseWarning] = useState<CloseWarning | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [dismissFor, setDismissFor] = useState<number | null>(null)
   const [dismissNote, setDismissNote] = useState('')
+  const [fillFor, setFillFor] = useState<number | null>(null)
+  const [fillValue, setFillValue] = useState('')
 
   const jobQuery = useQuery({
     queryKey: ['jobs', idOrDcreq],
@@ -63,8 +70,8 @@ export default function JobPage() {
   const items = itemsQuery.data?.items ?? []
   const groups = groupByType(items)
 
-  function invalidate() {
-    void qc.invalidateQueries({ queryKey: ['jobs'] })
+  async function invalidate() {
+    await qc.invalidateQueries({ queryKey: ['jobs'] })
   }
 
   const closeMut = useMutation({
@@ -73,7 +80,7 @@ export default function JobPage() {
       setCloseWarning(null)
       setError(null)
       void qc.setQueryData(['jobs', idOrDcreq], result.job)
-      invalidate()
+      void invalidate()
     },
     onError: (e) => {
       if (isJobHasOpenItems(e)) setCloseWarning(closeOpenItemsWarning(e))
@@ -86,7 +93,7 @@ export default function JobPage() {
     onSuccess: (next) => {
       setError(null)
       void qc.setQueryData(['jobs', idOrDcreq], next)
-      invalidate()
+      void invalidate()
     },
     onError: (e) => setError(e instanceof Error ? e.message : 'Reopen failed.'),
   })
@@ -95,7 +102,11 @@ export default function JobPage() {
     setError(null)
     try {
       await op()
-      invalidate()
+      setDismissFor(null)
+      setFillFor(null)
+      setFillValue('')
+      setDismissNote('')
+      await invalidate()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'That change could not be saved.')
     }
@@ -103,8 +114,7 @@ export default function JobPage() {
 
   const jobErr = jobQuery.error instanceof ApiError ? jobQuery.error.message : jobQuery.error instanceof Error ? jobQuery.error.message : null
   const overdueFlag = job ? (job.overdue || isJobOverdue(job)) : false
-  const unresolvedFromItems = itemsQuery.data && filter === 'unresolved' ? items.length : job?.unresolved_count
-  const localWrites = JOB_INTAKE_API.live && !JOB_INTAKE_API.openItemWrites
+  const unresolvedCount = job?.unresolved_count ?? 0
 
   return (
     <section className="job-page">
@@ -117,6 +127,11 @@ export default function JobPage() {
       </div>
       {jobQuery.isPending && <p className="hint">Loading…</p>}
       {jobErr && <p className="error" role="alert">{jobErr}</p>}
+      {job && justCreated && (
+        <div className="banner" role="status" aria-label="Job created">
+          <p>This job was created, and the ePIF and cable-matrix items are waiting in its fill-later queue.</p>
+        </div>
+      )}
       {job && (
         <>
           <div className="card">
@@ -124,8 +139,8 @@ export default function JobPage() {
               {job.name} · {job.status}
               {overdueFlag && <span className="job-overdue">Open more than 30 days</span>}
             </p>
-            <p className="hint">
-              {job.device_count} devices · {job.connection_count ?? 0} connections · {unresolvedFromItems ?? job.unresolved_count} in the fill-later queue
+            <p className="hint" data-testid="job-queue-summary">
+              {job.device_count} devices · {job.connection_count ?? 0} connections · {unresolvedCount} in the fill-later queue
               {job.deferred_count ? ` (${job.deferred_count} deferred)` : ''}.
               {job.days_open != null ? ` Open ${job.days_open} day${job.days_open === 1 ? '' : 's'}.` : ''}
             </p>
@@ -154,9 +169,9 @@ export default function JobPage() {
 
           <div className="card">
             <h2>Fill-later queue</h2>
-            {localWrites && (
+            {canWrite && !writesAvailable && (
               <p className="hint job-local-note" role="note">
-                Completing items is saved only in this browser until the API ships open-item writes.
+                {WRITES_PENDING_NOTE}
               </p>
             )}
             <div className="job-queue-filters" role="tablist" aria-label="Queue filter">
@@ -177,8 +192,8 @@ export default function JobPage() {
             {itemsQuery.error && <p className="error" role="alert">{itemsQuery.error instanceof Error ? itemsQuery.error.message : 'Failed to load items.'}</p>}
             {itemsQuery.isSuccess && items.length === 0 && <p className="hint">No items in this filter.</p>}
             {groups.map(([type, group]) => (
-              <section key={type} className="job-queue-group" role="region" aria-label={humanizeItemType(type)}>
-                <h3>{humanizeItemType(type)} <span className="job-badge">{group.length}</span></h3>
+              <section key={type} className="job-queue-group" role="region" aria-label={itemTypeLabel(type)}>
+                <h3>{itemTypeLabel(type)} <span className="job-badge">{group.length}</span></h3>
                 <ul className="job-intake-queue">
                   {group.map((item) => (
                     <li key={item.id} className="job-queue-item">
@@ -186,7 +201,7 @@ export default function JobPage() {
                         {item.hostname && <span className="mono">{item.hostname}</span>}
                         {item.hostname && item.filename ? ' · ' : ''}
                         {item.filename}
-                        {!item.hostname && !item.filename ? humanizeItemType(item.item_type) : null}
+                        {!item.hostname && !item.filename ? itemTypeLabel(item.item_type) : null}
                         {item.target_field ? ` · ${item.target_field}` : ''}
                         {item.cable_label ? ` · ${item.cable_label}` : ''}
                         <span className="job-badge">{item.status}</span>
@@ -195,19 +210,74 @@ export default function JobPage() {
                         <p className="hint">Held by {item.deferred_by ?? 'someone'}{item.deferred_at ? ` · ${item.deferred_at}` : ''}</p>
                       )}
                       {item.note && <p className="hint">{item.note}</p>}
-                      {canTrack && (item.status === 'open' || item.status === 'deferred') && (
+                      {item.filled_value && item.target_field && (
+                        <p className="hint">{item.target_field} set to {item.filled_value}</p>
+                      )}
+                      {canWrite && (item.status === 'open' || item.status === 'deferred') && (
                         <div className="actions">
-                          <button type="button" onClick={() => void runItem(() => jobIntakeApi().resolveItem(item.job_id, item.id))}>Complete</button>
+                          <button
+                            type="button"
+                            disabled={!canAct}
+                            onClick={() => void runItem(() => jobIntakeApi().resolveItem(item.job_id, item.id))}
+                          >
+                            Complete
+                          </button>
+                          <button
+                            type="button"
+                            disabled={!canAct}
+                            onClick={() => { if (canAct) { setFillFor(item.id); setFillValue(''); setDismissFor(null) } }}
+                          >
+                            Fill
+                          </button>
                           {item.status === 'open' && (
-                            <button type="button" onClick={() => void runItem(() => jobIntakeApi().deferItem(item.job_id, item.id))}>Hold for later</button>
+                            <button
+                              type="button"
+                              disabled={!canAct}
+                              onClick={() => void runItem(() => jobIntakeApi().deferItem(item.job_id, item.id))}
+                            >
+                              Hold
+                            </button>
                           )}
                           {item.status === 'deferred' && (
-                            <button type="button" onClick={() => void runItem(() => jobIntakeApi().undeferItem(item.job_id, item.id))}>Un-defer</button>
+                            <button
+                              type="button"
+                              disabled={!canAct}
+                              onClick={() => void runItem(() => jobIntakeApi().undeferItem(item.job_id, item.id))}
+                            >
+                              Un-defer
+                            </button>
                           )}
-                          <button type="button" onClick={() => { setDismissFor(item.id); setDismissNote('') }}>Dismiss</button>
+                          <button
+                            type="button"
+                            disabled={!canAct}
+                            onClick={() => { if (canAct) { setDismissFor(item.id); setDismissNote(''); setFillFor(null) } }}
+                          >
+                            Dismiss
+                          </button>
                         </div>
                       )}
-                      {dismissFor === item.id && (
+                      {canAct && fillFor === item.id && (
+                        <label className="field">
+                          {item.target_field ? `Value for ${item.target_field}` : 'Value'}
+                          <input
+                            value={fillValue}
+                            onChange={(e) => setFillValue(e.target.value)}
+                            aria-label={item.target_field ? `Value for ${item.target_field}` : 'Value'}
+                          />
+                          <div className="actions">
+                            <button type="button" onClick={() => setFillFor(null)}>Cancel</button>
+                            <button
+                              type="button"
+                              className="primary"
+                              disabled={!fillValue.trim()}
+                              onClick={() => void runItem(() => jobIntakeApi().fillItem(item.job_id, item.id, fillValue.trim()))}
+                            >
+                              Save and resolve
+                            </button>
+                          </div>
+                        </label>
+                      )}
+                      {canAct && dismissFor === item.id && (
                         <label className="field">
                           Dismiss note
                           <input value={dismissNote} onChange={(e) => setDismissNote(e.target.value)} aria-label="Dismiss note" />
@@ -217,10 +287,7 @@ export default function JobPage() {
                               type="button"
                               className="primary"
                               disabled={!dismissNote.trim()}
-                              onClick={() => void runItem(async () => {
-                                await jobIntakeApi().dismissItem(item.job_id, item.id, dismissNote.trim())
-                                setDismissFor(null)
-                              })}
+                              onClick={() => void runItem(() => jobIntakeApi().dismissItem(item.job_id, item.id, dismissNote.trim()))}
                             >
                               Dismiss item
                             </button>
@@ -239,4 +306,3 @@ export default function JobPage() {
     </section>
   )
 }
-
