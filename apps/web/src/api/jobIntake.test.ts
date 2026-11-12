@@ -60,7 +60,11 @@ describe('createJob', () => {
     expect(job.current).toBe(true)
     expect(job.overdue).toBe(false)
     expect(job.opened_at).toMatch(/Z$/)
-    expect(job.unresolved_count).toBe(0)
+    expect(job.unresolved_count).toBe(2)
+    expect(job.unresolved_by_type).toEqual({ epif_not_uploaded: 1, cable_matrix_not_uploaded: 1 })
+    expect((await api().listOpenItems(job.id, 'unresolved')).items.map((i) => i.item_type).sort()).toEqual([
+      'cable_matrix_not_uploaded', 'epif_not_uploaded',
+    ])
     expect(jobHref(job)).toBe('/jobs/DCREQ0001234')
   })
 
@@ -69,7 +73,7 @@ describe('createJob', () => {
     expect((await api().listJobs()).total).toBe(0)
   })
 
-  it('hard-stops a duplicate DCREQ with 409 duplicate_dcreq and the existing job', async () => {
+  it('hard-stops a duplicate DCREQ with 409 job_exists and the existing job', async () => {
     await api().createJob('DCREQ0001234')
     const first = await api().getJob('DCREQ0001234')
     let err: unknown
@@ -81,9 +85,9 @@ describe('createJob', () => {
     expect(isDuplicateDcreq(err)).toBe(true)
     expect(err).toBeInstanceOf(ApiError)
     expect((err as ApiError).status).toBe(409)
-    expect((err as ApiError).code).toBe('duplicate_dcreq')
+    expect((err as ApiError).code).toBe('job_exists')
     expect(duplicateExisting(err)).toEqual({
-      id: first.id, dcreq: 'DCREQ0001234', name: 'DCREQ0001234', status: 'open',
+      id: first.id, dcreq: 'DCREQ0001234', name: 'DCREQ0001234', status: 'open', is_job: true, deleted: false,
     })
     const d = errorDetail((err as ApiError).detail)!
     expect(friendlyMessage(d, 409)).toBe(
@@ -126,8 +130,6 @@ describe('overdue flag', () => {
 describe('close with open items', () => {
   it('refuses close with 409 job_has_open_items, then closes when acknowledged', async () => {
     const job = await api().createJob('DCREQ0003001')
-    await api().skipFile(job.id, 'cable_matrix')
-    await api().commitIntake(job.id)
     let err: unknown
     try {
       await api().closeJob(job.id)
@@ -136,7 +138,7 @@ describe('close with open items', () => {
     }
     expect(isJobHasOpenItems(err)).toBe(true)
     expect((err as ApiError).status).toBe(409)
-    expect(errorDetail((err as ApiError).detail)?.unresolved_count).toBe(1)
+    expect(errorDetail((err as ApiError).detail)?.unresolved_count).toBe(2)
     expect((await api().getJob(job.id)).status).toBe('open')
     const result = await api().closeJob(job.id, { acknowledge_open_items: true })
     expect(result.job.status).toBe('closed')
@@ -145,13 +147,15 @@ describe('close with open items', () => {
     expect(result.job.closed_at).toMatch(/Z$/)
     expect(result.warning).toEqual({
       code: 'job_has_open_items',
-      unresolved_count: 1,
-      message: 'This job still has 1 unresolved item.',
+      unresolved_count: 2,
+      message: 'This job still has 2 unresolved items.',
     })
   })
 
   it('closes with a null warning when the queue is empty', async () => {
     const job = await api().createJob('DCREQ0003002')
+    const pending = await api().listOpenItems(job.id, 'unresolved')
+    for (const item of pending.items) await api().resolveItem(job.id, item.id)
     const result = await api().closeJob(job.id)
     expect(result.job.status).toBe('closed')
     expect(result.warning).toBeNull()
@@ -189,7 +193,6 @@ describe('imports and commit', () => {
     )
     const staged = await api().stageImport(job.id, 'epif', file)
     expect(staged.counts).toEqual({ total: 3, ready: 1, warning: 1, held: 0, conflict: 1 })
-    await api().skipFile(job.id, 'cable_matrix')
     const preview = await api().previewJob(job.id)
     expect(preview.skipped.cable_matrix).toBe(true)
     expect(preview.pending_items.some((i) => i.item_type === 'cable_matrix_not_uploaded')).toBe(true)

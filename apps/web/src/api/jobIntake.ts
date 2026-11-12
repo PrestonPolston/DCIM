@@ -25,6 +25,7 @@ export type ImportKind = 'epif' | 'cable_matrix'
 export type ImportStatus = 'review' | 'committed' | 'abandoned'
 export type ImportRowResult = 'ready' | 'warning' | 'held' | 'conflict' | 'committed' | 'skipped'
 
+/** PSU columns become open items (missing_psu / psu_unparsed). unresolved_hop is used once p1_34 lands. */
 export type OpenItemType =
   | 'missing_hostname'
   | 'missing_profile'
@@ -199,11 +200,6 @@ export interface IntakeCommitResult {
   items: JobOpenItem[]
 }
 
-export interface SkipFileResult {
-  kind: ImportKind
-  item_type: 'epif_not_uploaded' | 'cable_matrix_not_uploaded'
-}
-
 export interface JobIntakeApi {
   createJob(dcreq: string): Promise<Job>
   getJob(idOrDcreq: number | string): Promise<Job>
@@ -212,8 +208,10 @@ export interface JobIntakeApi {
   reopenJob(id: number, note?: string | null): Promise<Job>
   abandonJob(id: number): Promise<void>
   stageImport(jobId: number, kind: ImportKind, file: File): Promise<JobImport>
-  skipFile(jobId: number, kind: ImportKind): Promise<SkipFileResult>
   previewJob(jobId: number): Promise<IntakePreview>
+  /** POST /jobs/{id}/imports/{import_id}/commit — one batch still in review. */
+  commitImport(jobId: number, importId: number): Promise<IntakeCommitResult>
+  /** POST /jobs/{id}/commit — every batch still in review. */
   commitIntake(jobId: number): Promise<IntakeCommitResult>
   listOpenItems(jobId: number, status?: OpenItemListStatus): Promise<{ items: JobOpenItem[]; total: number }>
   deferItem(jobId: number, itemId: number, note?: string | null): Promise<JobOpenItem>
@@ -318,6 +316,7 @@ function liveApi(): JobIntakeApi {
       })
       return 'job' in res ? res.job : res
     },
+    // DELETE /jobs/{id} (abandon) is not in the committed API. The wizard must not call this when live.
     abandonJob: (id) => request<void>(`/jobs/${id}`, { method: 'DELETE' }),
     async stageImport(jobId, kind, file) {
       const form = new FormData()
@@ -347,9 +346,9 @@ function liveApi(): JobIntakeApi {
       }
       return (await res.json()) as JobImport
     },
-    skipFile: (jobId, kind) =>
-      request<SkipFileResult>(`/jobs/${jobId}/imports/skip`, { method: 'POST', body: JSON.stringify({ kind }) }),
     previewJob: (jobId) => request<IntakePreview>(`/jobs/${jobId}/preview`),
+    commitImport: (jobId, importId) =>
+      request<IntakeCommitResult>(`/jobs/${jobId}/imports/${importId}/commit`, { method: 'POST' }),
     commitIntake: (jobId) => request<IntakeCommitResult>(`/jobs/${jobId}/commit`, { method: 'POST' }),
     listOpenItems: (jobId, status = 'unresolved') => listPage<JobOpenItem>(`/jobs/${jobId}/open-items`, { status }),
     deferItem: (jobId, itemId, note = null) =>

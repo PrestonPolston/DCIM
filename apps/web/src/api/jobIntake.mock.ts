@@ -69,6 +69,10 @@ function flags(job: Job, now = Date.now()): Job {
     days_since_closed: job.status === 'closed' ? daysSinceClosed : null,
     unresolved_count: unresolved.length,
     deferred_count: unresolved.filter((i) => i.status === 'deferred').length,
+    unresolved_by_type: unresolved.reduce<Record<string, number>>((acc, i) => {
+      acc[i.item_type] = (acc[i.item_type] ?? 0) + 1
+      return acc
+    }, {}),
   }
 }
 
@@ -84,7 +88,7 @@ function getJobOrThrow(idOrDcreq: number | string): Job {
 }
 
 function existingRef(job: Job) {
-  return { id: job.id, dcreq: job.dcreq, name: job.name, status: job.status }
+  return { id: job.id, dcreq: job.dcreq, name: job.name, status: job.status, is_job: true, deleted: false }
 }
 
 function countsOf(rows: ImportRow[]) {
@@ -227,6 +231,83 @@ export function seedMockOpenItem(init: Partial<JobOpenItem> & { job_id: number; 
   })
 }
 
+
+function resolveSkipItem(job: Job, kind: ImportKind) {
+  const type = skipType(kind)
+  const item = store.items.find((i) => i.job_id === job.id && i.item_type === type && (i.status === 'open' || i.status === 'deferred'))
+  if (!item) return
+  item.status = 'resolved'
+  item.resolved_at = iso()
+  item.resolved_by = ACTOR
+}
+
+function finalizeCommit(job: Job, batches: JobImport[]): IntakeCommitResult {
+  const warnings: IntakeWarning[] = []
+  const skipped_conflicts: SkippedConflictRow[] = []
+  for (const batch of batches) {
+    if (batch.status !== 'review') continue
+    for (const row of batch.rows) {
+      if (row.result === 'conflict') {
+        skipped_conflicts.push({
+          import_id: batch.id,
+          kind: batch.kind,
+          row_number: row.row_number,
+          hostname: row.hostname,
+          label: row.label,
+          messages: row.messages,
+        })
+        addItem({
+          job_id: job.id, dcreq: job.dcreq, item_type: 'other', status: 'open',
+          target_field: row.messages[0]?.field ?? 'hostname', note: row.messages[0]?.message ?? null,
+          source: batch.kind, import_row_id: row.id, filename: batch.filename, hostname: row.hostname,
+          cable_label: row.label, trail: null, epif_request_id: null, device_id: null,
+          device_psu_assignment_id: null, connection_id: null, cable_id: null,
+          created_by: ACTOR, deferred_at: null, deferred_by: null, resolved_at: null, resolved_by: null,
+        })
+        row.result = 'skipped'
+        continue
+      }
+      if (row.result === 'warning' || row.result === 'held') {
+        const type = (row.messages[0]?.code as OpenItemType) || 'other'
+        warnings.push({
+          code: row.messages[0]?.code ?? 'warning',
+          message: row.messages[0]?.message ?? 'This row has a warning.',
+          item_type: type,
+          target_field: row.messages[0]?.field ?? undefined,
+          row_number: row.row_number,
+          hostname: row.hostname ?? undefined,
+        })
+        addItem({
+          job_id: job.id, dcreq: job.dcreq, item_type: type, status: 'open',
+          target_field: row.messages[0]?.field ?? null, note: null, source: batch.kind,
+          import_row_id: row.id, filename: batch.filename, hostname: row.hostname,
+          cable_label: row.label, trail: null, epif_request_id: null, device_id: null,
+          device_psu_assignment_id: null, connection_id: null, cable_id: null,
+          created_by: ACTOR, deferred_at: null, deferred_by: null, resolved_at: null, resolved_by: null,
+        })
+      }
+      if (row.result === 'ready' || row.result === 'warning') {
+        if (batch.kind === 'epif') job.device_count += 1
+        if (batch.kind === 'cable_matrix') job.connection_count += 1
+        row.result = 'committed'
+      }
+    }
+    batch.status = 'committed'
+    batch.counts = countsOf(batch.rows)
+    resolveSkipItem(job, batch.kind)
+  }
+  job.updated_at = iso()
+  const committed = flags(job)
+  return {
+    job: committed,
+    imports: store.imports.filter((i) => i.job_id === job.id),
+    warnings,
+    skipped_conflicts,
+    open_item_count: committed.unresolved_count,
+    items: store.items.filter((i) => i.job_id === job.id),
+  } satisfies IntakeCommitResult
+}
+
 export function createMockJobIntakeApi(): JobIntakeApi {
   store = empty()
   return {
@@ -240,12 +321,22 @@ export function createMockJobIntakeApi(): JobIntakeApi {
         const job = flags(found)
         throwApi(
           409,
-          'duplicate_dcreq',
+          'job_exists',
           `${job.dcreq} is already a job (${job.name}, ${job.status}). Attaching more work to that job isn’t available yet.`,
           { existing: existingRef(job) },
         )
       }
-      return seedMockJob({ dcreq })
+      const created = seedMockJob({ dcreq })
+      for (const kind of ['epif', 'cable_matrix'] as const) {
+        addItem({
+          job_id: created.id, dcreq: created.dcreq, item_type: skipType(kind), status: 'open',
+          target_field: null, note: null, source: 'manual', import_row_id: null, filename: null,
+          hostname: null, cable_label: null, trail: null, epif_request_id: null, device_id: null,
+          device_psu_assignment_id: null, connection_id: null, cable_id: null,
+          created_by: ACTOR, deferred_at: null, deferred_by: null, resolved_at: null, resolved_by: null,
+        })
+      }
+      return flags(created)
     },
     async getJob(idOrDcreq) {
       return getJobOrThrow(idOrDcreq)
@@ -366,11 +457,6 @@ export function createMockJobIntakeApi(): JobIntakeApi {
       store.skipped = store.skipped.filter((s) => !(s.jobId === jobId && s.kind === kind))
       return batch
     },
-    async skipFile(jobId, kind) {
-      getJobOrThrow(jobId)
-      if (!store.skipped.some((s) => s.jobId === jobId && s.kind === kind)) store.skipped.push({ jobId, kind })
-      return { kind, item_type: skipType(kind) }
-    },
     async previewJob(jobId) {
       const job = getJobOrThrow(jobId)
       const latest = (kind: ImportKind) => {
@@ -379,10 +465,7 @@ export function createMockJobIntakeApi(): JobIntakeApi {
       }
       const epif = latest('epif')
       const cable = latest('cable_matrix')
-      const skipped = {
-        epif: store.skipped.some((s) => s.jobId === jobId && s.kind === 'epif') && !epif,
-        cable_matrix: store.skipped.some((s) => s.jobId === jobId && s.kind === 'cable_matrix') && !cable,
-      }
+      const skipped = { epif: !epif, cable_matrix: !cable }
       const pending: JobOpenItem[] = []
       for (const batch of [epif, cable]) {
         if (!batch || batch.status === 'committed') continue
@@ -416,90 +499,25 @@ export function createMockJobIntakeApi(): JobIntakeApi {
           })
         }
       }
-      if (skipped.epif) pending.push(previewSkip(job, 'epif'))
-      if (skipped.cable_matrix) pending.push(previewSkip(job, 'cable_matrix'))
+      const existing = store.items.filter((i) => i.job_id === jobId && (i.status === 'open' || i.status === 'deferred'))
+      for (const item of existing) {
+        const kind = item.item_type === 'epif_not_uploaded' ? 'epif' as const
+          : item.item_type === 'cable_matrix_not_uploaded' ? 'cable_matrix' as const
+          : null
+        if (kind && (kind === 'epif' ? epif : cable)) continue // a staged file will resolve this on commit
+        pending.push(item)
+      }
       return { job, epif, cable_matrix: cable, skipped, pending_items: pending }
+    },
+    async commitImport(jobId, importId) {
+      const job = findJob(jobId)
+      const batch = store.imports.find((i) => i.job_id === jobId && i.id === importId && i.status === 'review')
+      if (!batch) throwApi(404, 'not_found', 'Import not found')
+      return finalizeCommit(job, [batch])
     },
     async commitIntake(jobId) {
       const job = findJob(jobId)
-      const batches = store.imports.filter((i) => i.job_id === jobId && i.status === 'review')
-      const warnings: IntakeWarning[] = []
-      const skipped_conflicts: SkippedConflictRow[] = []
-      const items: JobOpenItem[] = []
-      for (const batch of batches) {
-        for (const row of batch.rows) {
-          if (row.result === 'conflict') {
-            skipped_conflicts.push({
-              import_id: batch.id,
-              kind: batch.kind,
-              row_number: row.row_number,
-              hostname: row.hostname,
-              label: row.label,
-              messages: row.messages,
-            })
-            items.push(addItem({
-              job_id: job.id, dcreq: job.dcreq, item_type: 'other', status: 'open',
-              target_field: row.messages[0]?.field ?? 'hostname', note: row.messages[0]?.message ?? null,
-              source: batch.kind, import_row_id: row.id, filename: batch.filename, hostname: row.hostname,
-              cable_label: row.label, trail: null, epif_request_id: null, device_id: null,
-              device_psu_assignment_id: null, connection_id: null, cable_id: null,
-              created_by: ACTOR, deferred_at: null, deferred_by: null, resolved_at: null, resolved_by: null,
-            }))
-            row.result = 'skipped'
-            continue
-          }
-          if (row.result === 'warning' || row.result === 'held') {
-            const type = (row.messages[0]?.code as OpenItemType) || 'other'
-            warnings.push({
-              code: row.messages[0]?.code ?? 'warning',
-              message: row.messages[0]?.message ?? 'This row has a warning.',
-              item_type: type,
-              target_field: row.messages[0]?.field ?? undefined,
-              row_number: row.row_number,
-              hostname: row.hostname ?? undefined,
-            })
-            items.push(addItem({
-              job_id: job.id, dcreq: job.dcreq, item_type: type, status: 'open',
-              target_field: row.messages[0]?.field ?? null, note: null, source: batch.kind,
-              import_row_id: row.id, filename: batch.filename, hostname: row.hostname,
-              cable_label: row.label, trail: null, epif_request_id: null, device_id: null,
-              device_psu_assignment_id: null, connection_id: null, cable_id: null,
-              created_by: ACTOR, deferred_at: null, deferred_by: null, resolved_at: null, resolved_by: null,
-            }))
-          }
-          if (row.result === 'ready' || row.result === 'warning') {
-            if (batch.kind === 'epif') job.device_count += 1
-            if (batch.kind === 'cable_matrix') job.connection_count += 1
-            row.result = 'committed'
-          }
-        }
-        batch.status = 'committed'
-        batch.counts = countsOf(batch.rows)
-      }
-      const kinds: ImportKind[] = ['epif', 'cable_matrix']
-      for (const kind of kinds) {
-        const hasCommitted = store.imports.some((i) => i.job_id === jobId && i.kind === kind && i.status === 'committed')
-        const skipped = store.skipped.some((s) => s.jobId === jobId && s.kind === kind)
-        if (!hasCommitted && skipped) {
-          items.push(addItem({
-            job_id: job.id, dcreq: job.dcreq, item_type: skipType(kind), status: 'open',
-            target_field: null, note: null, source: 'manual', import_row_id: null, filename: null,
-            hostname: null, cable_label: null, trail: null, epif_request_id: null, device_id: null,
-            device_psu_assignment_id: null, connection_id: null, cable_id: null,
-            created_by: ACTOR, deferred_at: null, deferred_by: null, resolved_at: null, resolved_by: null,
-          }))
-        }
-      }
-      job.updated_at = iso()
-      const committed = flags(job)
-      return {
-        job: committed,
-        imports: store.imports.filter((i) => i.job_id === jobId),
-        warnings,
-        skipped_conflicts,
-        open_item_count: committed.unresolved_count,
-        items: store.items.filter((i) => i.job_id === jobId),
-      } satisfies IntakeCommitResult
+      return finalizeCommit(job, store.imports.filter((i) => i.job_id === jobId && i.status === 'review'))
     },
     async listOpenItems(jobId, status: OpenItemListStatus = 'unresolved') {
       getJobOrThrow(jobId)
@@ -541,34 +559,5 @@ export function createMockJobIntakeApi(): JobIntakeApi {
       item.resolved_by = ACTOR
       return item
     },
-  }
-}
-
-function previewSkip(job: Job, kind: ImportKind): JobOpenItem {
-  return {
-    id: 0,
-    job_id: job.id,
-    dcreq: job.dcreq,
-    item_type: skipType(kind),
-    status: 'open',
-    target_field: null,
-    note: null,
-    source: 'manual',
-    epif_request_id: null,
-    device_id: null,
-    device_psu_assignment_id: null,
-    connection_id: null,
-    cable_id: null,
-    import_row_id: null,
-    filename: null,
-    hostname: null,
-    cable_label: null,
-    trail: null,
-    created_at: iso(),
-    created_by: ACTOR,
-    deferred_at: null,
-    deferred_by: null,
-    resolved_at: null,
-    resolved_by: null,
   }
 }

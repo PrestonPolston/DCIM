@@ -128,7 +128,7 @@ describe('CSV upload, preview and import result', () => {
     expect(screen.getByRole('status')).toHaveTextContent('1 conflict')
     await user.click(screen.getByRole('button', { name: 'Next: Cable matrix' }))
     await user.click(screen.getByRole('button', { name: 'Skip cable matrix' }))
-    expect(await screen.findByRole('status')).toHaveTextContent(/cable_matrix_not_uploaded/)
+    expect(await screen.findByRole('status')).toHaveTextContent(/cable_matrix_not_uploaded item created with this job will stay open/)
     await user.click(screen.getByRole('button', { name: 'Next: Preview' }))
     expect(await screen.findByRole('heading', { name: /Preview/ })).toBeInTheDocument()
     expect(screen.getByText(/ePIF 3 rows/)).toBeInTheDocument()

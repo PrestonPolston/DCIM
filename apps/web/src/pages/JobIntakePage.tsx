@@ -57,7 +57,7 @@ function FileSlot({
           {current.filename}: {current.counts.total} rows · {current.counts.ready} ready · {current.counts.warning} warning · {current.counts.held} held · {current.counts.conflict} conflict
         </p>
       ) : skipped ? (
-        <p className="hint" role="status">Skipped. This will add a fill-later item ({kind === 'epif' ? 'epif_not_uploaded' : 'cable_matrix_not_uploaded'}).</p>
+        <p className="hint" role="status">Skipped. The {kind === 'epif' ? 'epif_not_uploaded' : 'cable_matrix_not_uploaded'} item created with this job will stay open.</p>
       ) : (
         <p className="hint">.csv only, 8 MiB max. Skipping is allowed.</p>
       )}
@@ -151,19 +151,10 @@ export default function JobIntakePage() {
     }
   }
 
-  async function skip(kind: ImportKind) {
-    if (!job) return
-    setBusy(true)
-    setError(null)
-    try {
-      await jobIntakeApi().skipFile(job.id, kind)
-      if (kind === 'epif') { setEpif(null); setSkipped((s) => ({ ...s, epif: true })); setFileError((e) => ({ ...e, epif: null })) }
-      else { setCable(null); setSkipped((s) => ({ ...s, cable_matrix: true })); setFileError((e) => ({ ...e, cable_matrix: null })) }
-    } catch (e) {
-      setFileError((err) => ({ ...err, [kind]: errText(e) }))
-    } finally {
-      setBusy(false)
-    }
+  function skip(kind: ImportKind) {
+    // No skip endpoint: the not-uploaded items were created with the job.
+    if (kind === 'epif') { setEpif(null); setSkipped((s) => ({ ...s, epif: true })); setFileError((e) => ({ ...e, epif: null })) }
+    else { setCable(null); setSkipped((s) => ({ ...s, cable_matrix: true })); setFileError((e) => ({ ...e, cable_matrix: null })) }
   }
 
   function clearFile(kind: ImportKind) {
@@ -199,18 +190,10 @@ export default function JobIntakePage() {
     }
   }
 
-  async function cancelIntake() {
+  function cancelIntake() {
+    // DELETE/abandon is not in the committed API. After create, just leave the job.
     if (!job) { navigate('/'); return }
-    if (result) { navigate(jobHref(job)); return }
-    setBusy(true)
-    try {
-      await jobIntakeApi().abandonJob(job.id)
-      navigate('/')
-    } catch (e) {
-      setError(errText(e))
-    } finally {
-      setBusy(false)
-    }
+    navigate(jobHref(job))
   }
 
   const epifReady = !!epif || skipped.epif
@@ -298,13 +281,13 @@ export default function JobIntakePage() {
             skipped={skipped.epif}
             disabled={!canWrite || busy}
             onFile={(f) => void upload('epif', f)}
-            onSkip={() => void skip('epif')}
+            onSkip={() => skip('epif')}
             onClear={() => clearFile('epif')}
             error={fileError.epif}
           />
           {error && <p className="error" role="alert">{error}</p>}
           <div className="actions">
-            <button type="button" disabled={busy} onClick={() => void cancelIntake()}>Cancel intake</button>
+            <button type="button" disabled={busy} onClick={() => cancelIntake()}>Cancel intake</button>
             <button type="button" className="primary" disabled={!canWrite || !epifReady || busy} onClick={() => setStep(2)}>
               Next: Cable matrix
             </button>
@@ -321,13 +304,13 @@ export default function JobIntakePage() {
             skipped={skipped.cable_matrix}
             disabled={!canWrite || busy}
             onFile={(f) => void upload('cable_matrix', f)}
-            onSkip={() => void skip('cable_matrix')}
+            onSkip={() => skip('cable_matrix')}
             onClear={() => clearFile('cable_matrix')}
             error={fileError.cable_matrix}
           />
           {error && <p className="error" role="alert">{error}</p>}
           <div className="actions">
-            <button type="button" disabled={busy} onClick={() => void cancelIntake()}>Cancel intake</button>
+            <button type="button" disabled={busy} onClick={() => cancelIntake()}>Cancel intake</button>
             <button type="button" disabled={busy} onClick={() => setStep(1)}>Back</button>
             <button type="button" className="primary" disabled={!canWrite || !cableReady || busy} onClick={() => void goPreview()}>
               Next: Preview
@@ -359,7 +342,7 @@ export default function JobIntakePage() {
           )}
           {error && <p className="error" role="alert">{error}</p>}
           <div className="actions">
-            <button type="button" disabled={busy} onClick={() => void cancelIntake()}>Cancel intake</button>
+            <button type="button" disabled={busy} onClick={() => cancelIntake()}>Cancel intake</button>
             <button type="button" disabled={busy} onClick={() => { setResult(null); setStep(2) }}>Back</button>
             <button type="button" className="primary" disabled={!canWrite || !preview || busy} onClick={() => void commit()}>
               Commit job{pending.length ? ` — ${pending.length} stay in queue` : ''}
