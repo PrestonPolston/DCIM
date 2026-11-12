@@ -24,6 +24,13 @@ const COPY: Record<string, string> = {
   cabinet_profile_in_use: "Can't delete: in use. Retire it instead.",
   cabinet_profile_name_taken: 'A profile with this manufacturer, model and variant already exists.',
   version_conflict: 'Changed by someone else since you opened it. Reload to see the latest.',
+  // Job intake v1 (proposed contract; remap if Backend ships different codes).
+  dcreq_format: 'Enter a DCREQ like DCREQ0001234 (DCREQ000 + 4 digits).',
+  duplicate_dcreq: 'That DCREQ is already a job. Attaching more work to that job isn’t available yet.',
+  job_exists: 'That DCREQ is already a job. Attaching more work to that job isn’t available yet.',
+  import_forbidden_columns: 'This file has forbidden columns. Remove those columns and upload again. Secrets are never stored.',
+  unknown_columns: 'This file has unknown columns. Remove them and upload again.',
+  job_not_empty: 'This job already has committed work, so it can’t be deleted. Close it instead.',
 }
 /** 409 on editing a flagged device: the code is its needs_review_reason (lifecycle.py _check_flagged_edit). */
 const FLAGGED: Record<string, string> = {
@@ -31,7 +38,19 @@ const FLAGGED: Record<string, string> = {
   profile_not_published: "This device's profile isn't published. Choose a published profile, unplace it, or decommission it before other edits.",
 }
 
-export interface ErrorDetail { code?: string; message?: string; missing?: string[]; profile_id?: number; issues?: string[]; reason?: string }
+export interface ExistingJobRef { id: number; dcreq: string; name: string; status: string }
+export interface ErrorDetail {
+  code?: string
+  message?: string
+  missing?: string[]
+  profile_id?: number
+  issues?: string[]
+  reason?: string
+  existing?: ExistingJobRef
+  headers?: string[]
+  columns?: string[]
+  unresolved_count?: number
+}
 
 export function errorDetail(detail: unknown): ErrorDetail | null {
   const d = (detail as { detail?: unknown } | undefined)?.detail
@@ -46,6 +65,16 @@ export function friendlyMessage(d: ErrorDetail, status?: number): string | null 
     const issues = d.issues ?? (d.reason ? [d.reason] : [])
     if (issues.includes('rear_image_missing')) return 'Upload a rear image for this profile first. Existing devices on it are unaffected.'
     if (issues.includes('orientation_missing')) return 'Set the orientation (Power front / Port front) for this profile first.'
+  }
+  if ((d.code === 'import_forbidden_columns' || d.code === 'unknown_columns') && (d.headers?.length || d.columns?.length)) {
+    const names = (d.headers ?? d.columns ?? []).join(', ')
+    return d.code === 'import_forbidden_columns'
+      ? `This file has forbidden columns: ${names}. Remove those columns and upload again. Secrets are never stored.`
+      : `This file has unknown columns: ${names}. Remove them and upload again.`
+  }
+  if ((d.code === 'duplicate_dcreq' || d.code === 'job_exists') && d.existing) {
+    const e = d.existing
+    return `${e.dcreq} is already a job (${e.name}, ${e.status}). Attaching more work to that job isn’t available yet.`
   }
   return d.missing?.length ? `${base} Missing: ${d.missing.join(', ')}.` : base
 }
