@@ -29,7 +29,8 @@ Base URL in dev: `http://127.0.0.1:8000`. The full schema is in `apps/api/openap
 | `/vendors` | **name** (unique case-insensitively) | `q` |
 | `/contacts` | name, email (needs at least one; email unique case-insensitively, stored lower-case), phone, organization, vendor_id. **Contains PII** and is never in the device CSV | `q` |
 | `/projects` | **name**, description, site_id (alias `building_id`), intake_id (unique when set), intake_date. DELETE is a soft delete | `q` (name/intake_id) |
-| `/projects/{id}/references` | **kind** (`CHG | DCREQ | INC | OTHER`), **ref**; duplicate → 409. Lookup with `GET /project-references?kind=CHG&ref=CHG0001` | |
+| `/projects/{id}/references` | **kind** (`CHG | DCREQ | INC | OTHER`), **ref**; duplicate → 409. Lookup with `GET /project-references?kind=CHG&ref=CHG0001`. A `DCREQ` ref is trimmed + uppercased and must match `DCREQ000` + 4 digits (422 `dcreq_format`); a DCREQ already on any project is 409 `job_exists`; a second DCREQ on one project is 409 `one_dcreq_per_job` (v1); deleting a job's primary DCREQ is 409 `reference_is_job_key` | |
+| `/jobs` (job intake) | **dcreq**, name (default = the DCREQ), description, site_id. Create is tech/admin; a job is a project with a primary DCREQ. See "Jobs" below | `status`, `overdue`, `recently_closed`, `q` |
 | `/projects/{id}/contacts` | **contact_id**, **contact_role** (`dc | vendor | other`), title; DELETE `/projects/{id}/contacts/{contact_id}?contact_role=` | |
 | `/users` (admin) | **email**, **role**, display_name, temporary_password (omit to generate); PATCH role / is_active; `POST /users/{id}/reset-password`, `/unlock` | |
 | `/audit-events` (admin, GET only) | append-only log: actor, action, entity, before/after, request id, `via` (api, script, migration, csv_import), `retention_class` (standard, or restorable = deletion snapshots, kept ≥ 24 months and excluded from the 13-month purge; `DCIM_RESTORABLE_RETENTION_MONTHS`) | see openapi |
@@ -68,7 +69,7 @@ Device enums: `status` is one of `install | active | decom`, default **`install`
   |---|---|---|---|
   | GET anything (except below) | yes | yes | yes |
   | `/users`, `/audit-events` | yes | no | no |
-  | Create/patch devices, CSV import, create device types and profiles | yes | yes | no |
+  | Create/patch devices, CSV import, create device types and profiles, create/close/reopen jobs | yes | yes | no |
   | Move a cabinet (PATCH `/racks/{id}` with only `pos_x`, `pos_y`, `orientation`) | yes | yes | no |
   | Create/patch/delete sites, halls, rows, cabinets; delete devices; patch/delete device types and profiles | yes | no | no |
   Wrong role → 403; no session → 401.
@@ -479,3 +480,45 @@ A cabinet profile describes the cabinet alone, with doors and rails included. It
 | 413/415/422/429/503 | `image_*` | the same image errors as device-profile images |
 
 **Audit.** Every action is in `audit_events` with `entity_type=cabinet_profile`, under a change set: `cabinet_profile.create|update|delete` (the listener; delete carries the full snapshot) and `cabinet_profile.publish|retire|unretire|clone|image.put|image.delete`.
+
+## Jobs (job intake v1, slice 1; migrations `p1_30_project_dcreq` … `p1_33_job_open_items`)
+
+Spec: `docs/db/JOB_INTAKE.md` (D104–D109) and `docs/design/job-intake.md`. A **job** is a `projects` row whose **primary DCREQ** (`project_references(kind='DCREQ')`, `projects.primary_dcreq_id`) is the job number. Projects without a primary DCREQ (legacy) are not jobs and are not listed. Reads: every signed-in role. Writes: **technician or admin** (read-only 403 `Requires role: admin or technician`; no session 401). Timestamps are UTC with `Z`.
+
+**DCREQ format.** `DCREQ000` + 4 ASCII digits, 12 characters (`^DCREQ000[0-9]{4}$`). The server trims and uppercases, then validates; it does **not** rebuild `0001234` or `1234` (the web does). A bad value is **422** `{"detail": {"code": "dcreq_format", "message": "Enter a DCREQ like DCREQ0001234 (DCREQ000 + 4 digits).", "field": "dcreq"}}` and nothing is created. The value is never echoed. The DB backs this with `ck_project_references_dcreq_format` and `uq_project_references_dcreq` (one project per DCREQ).
+
+| Route | Role | Result |
+|---|---|---|
+| `POST /jobs` `{dcreq, name?, description?, site_id?}` | tech/admin | **201** `JobDetail`. One change set: the project (`status=open`, `opened_at=now`, `intake_date=today` UTC, `name` = DCREQ unless given), its DCREQ reference, and two open items `epif_not_uploaded` + `cable_matrix_not_uploaded` (`source=manual`, no target). Audit `job.create`. **422** `dcreq_format`. **409** `job_exists` with `existing: {id, dcreq, name, status, is_job, deleted}` (hard stop; attach is later). A CSV never creates a job. |
+| `GET /jobs` | any | `Job[]`, `X-Total-Count`, `limit`/`offset`. Filters: `status=open|closed`; `overdue=true` (current and open > 30 days) / `false`; `recently_closed=true` (closed in the last 30 days) / `false`; `q` = contains on the DCREQ or name (`%`/`_` literal). Order: `opened_at` desc, then id desc; with `recently_closed=true`, `closed_at` desc. |
+| `GET /jobs/{id_or_dcreq}` | any | `JobDetail`. A numeric key is the id; anything else is normalized as a DCREQ. Unknown or soft-deleted → **404** `job_not_found`. |
+| `POST /jobs/{id_or_dcreq}/close` `{acknowledge_open_items?: bool, note?}` | tech/admin | With unresolved items (open + deferred) and no `acknowledge_open_items: true` → **409** `{code: "job_has_open_items", message, unresolved_count}`, nothing changes. Otherwise **200** `{job: JobDetail, warning: {code: "job_has_open_items", message, unresolved_count} | null}`. Sets `closed_at`/`closed_by`; items stay. Already closed → 409 `job_already_closed`. Audit `job.close` (with the count and whether it was acknowledged). Body is optional when there are no unresolved items. |
+| `POST /jobs/{id_or_dcreq}/reopen` `{note?}` | tech/admin | **200** `{job: JobDetail}`. `status=open`, `closed_at`/`closed_by` cleared. **`opened_at` is never rewritten**, so the 30-day clock keeps running from DCREQ entry. Already open → 409 `job_already_open`. Audit `job.reopen`. |
+| `GET /jobs/{id_or_dcreq}/open-items?status=unresolved|open|deferred|resolved|dismissed|all` | any | `OpenItem[]` (default `unresolved` = open + deferred), `X-Total-Count`, oldest first. `filename`, `hostname`, `cable_label` are joined at read time. Defer/undefer/resolve/dismiss come with the import slices. |
+
+**Job** fields: `id, dcreq, name, description, site_id, primary_dcreq_id, status (open|closed), opened_at, closed_at, closed_by, created_at, updated_at, created_by`, and computed (never stored): `current` (open and not deleted), `overdue` (current and `opened_at` more than 30 days ago), `overdue_at` (`opened_at` + 30 days), `days_open` (whole days since `opened_at`), `recently_closed` (closed and `closed_at` within 30 days), `days_since_closed`, `unresolved_count` (open + deferred items), `deferred_count`, `device_count` (live devices with this `project_id`). **JobDetail** adds `unresolved_by_type` `{item_type: n}`.
+
+**OpenItem** fields: `id, job_id, dcreq, item_type, status (open|deferred|resolved|dismissed), target_field, note, source (epif|cable_matrix|manual), device_id, connection_id, cable_id, import_row_id, filename, hostname, cable_label, created_at, created_by, deferred_at, deferred_by, resolved_at, resolved_by`. `item_type` is one of `epif_not_uploaded, cable_matrix_not_uploaded, missing_hostname, missing_profile, profile_not_usable, unresolved_cabinet, missing_position, missing_serial, missing_psu, psu_unparsed, pdu_missing, missing_port, unresolved_hop, missing_cable_label, missing_trail, media_missing, ip_missing, space_power_flag, other`.
+
+Example `POST /jobs` `{"dcreq": "DCREQ0001234", "name": "Leaf refresh"}` → 201:
+
+```json
+{"id": 1, "dcreq": "DCREQ0001234", "name": "Leaf refresh", "description": null, "site_id": null,
+ "primary_dcreq_id": 1, "status": "open", "opened_at": "2026-11-12T13:56:39.307862Z", "closed_at": null,
+ "closed_by": null, "created_at": "2026-11-12T13:56:39.309388Z", "updated_at": "2026-11-12T13:56:39.313433Z",
+ "created_by": "tech@example.com", "current": true, "overdue": false, "overdue_at": "2026-12-12T13:56:39.307862Z",
+ "days_open": 0, "recently_closed": false, "days_since_closed": null, "unresolved_count": 2, "deferred_count": 0,
+ "device_count": 0, "unresolved_by_type": {"cable_matrix_not_uploaded": 1, "epif_not_uploaded": 1}}
+```
+
+Duplicate → 409:
+
+```json
+{"detail": {"code": "job_exists",
+  "message": "DCREQ0001234 is already a job (Leaf refresh, open). Attaching more work to that job isn't available yet.",
+  "existing": {"id": 1, "dcreq": "DCREQ0001234", "name": "Leaf refresh", "status": "open", "is_job": true, "deleted": false}}}
+```
+
+`POST /jobs/1/close` (no body) with items → 409 `{"detail": {"code": "job_has_open_items", "message": "This job still has 2 unresolved items. Close again with acknowledge_open_items=true to close it anyway.", "unresolved_count": 2}}`; with `{"acknowledge_open_items": true}` → 200 `{"job": {…, "status": "closed", "closed_at": "…Z", "closed_by": "tech@example.com", "recently_closed": true}, "warning": {"code": "job_has_open_items", "message": "This job still has 2 unresolved items.", "unresolved_count": 2}}`.
+
+Not in this slice: ePIF and cable-matrix upload/preview/commit (`job_imports`, `import_rows` tables exist but have no routes yet), open-item defer/resolve/dismiss, abandon (`DELETE /jobs/{id}`), and the home job tiles (still parked).

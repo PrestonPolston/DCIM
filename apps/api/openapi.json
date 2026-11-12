@@ -6949,6 +6949,440 @@
         }
       }
     },
+    "/jobs": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Create Job",
+        "description": "Step 1 of intake: a new DCREQ creates the job (409 job_exists if it is already known).",
+        "operationId": "create_job_jobs_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "List Jobs",
+        "operationId": "list_jobs_jobs_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "open",
+                    "closed"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "overdue",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "true: only current jobs open more than 30 days",
+              "title": "Overdue"
+            },
+            "description": "true: only current jobs open more than 30 days"
+          },
+          {
+            "name": "recently_closed",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "true: only jobs closed in the last 30 days",
+              "title": "Recently Closed"
+            },
+            "description": "true: only jobs closed in the last 30 days"
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 100
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Contains-search on the DCREQ or the name",
+              "title": "Q"
+            },
+            "description": "Contains-search on the DCREQ or the name"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "description": "Max items to return",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "Max items to return"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Items to skip",
+              "default": 0,
+              "title": "Offset"
+            },
+            "description": "Items to skip"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Job"
+                  },
+                  "title": "Response List Jobs Jobs Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{job_key}": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Get Job",
+        "description": "`job_key` is the numeric id or the DCREQ.",
+        "operationId": "get_job_jobs__job_key__get",
+        "parameters": [
+          {
+            "name": "job_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{job_key}/close": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Close Job",
+        "description": "Close. With unresolved items this is 409 job_has_open_items unless acknowledge_open_items is true;\nthen it closes and the 200 body carries the same warning.",
+        "operationId": "close_job_jobs__job_key__close_post",
+        "parameters": [
+          {
+            "name": "job_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/JobClose"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobCloseResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{job_key}/reopen": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Reopen Job",
+        "description": "Reopen. opened_at (the 30-day clock) is not reset.",
+        "operationId": "reopen_job_jobs__job_key__reopen_post",
+        "parameters": [
+          {
+            "name": "job_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/JobReopen"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{job_key}/open-items": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "List Open Items",
+        "description": "The job's fill-later queue (read-only in this slice). unresolved = open + deferred.",
+        "operationId": "list_open_items_jobs__job_key__open_items_get",
+        "parameters": [
+          {
+            "name": "job_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Key"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "unresolved",
+                "open",
+                "deferred",
+                "resolved",
+                "dismissed",
+                "all"
+              ],
+              "type": "string",
+              "default": "unresolved",
+              "title": "Status"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "description": "Max items to return",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "Max items to return"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Items to skip",
+              "default": 0,
+              "title": "Offset"
+            },
+            "description": "Items to skip"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OpenItem"
+                  },
+                  "title": "Response List Open Items Jobs  Job Key  Open Items Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/": {
       "get": {
         "summary": "Root",
@@ -12141,6 +12575,514 @@
         ],
         "title": "ImportRowError"
       },
+      "Job": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "dcreq": {
+            "type": "string",
+            "title": "Dcreq"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "site_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Site Id"
+          },
+          "primary_dcreq_id": {
+            "type": "integer",
+            "title": "Primary Dcreq Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "closed"
+            ],
+            "title": "Status"
+          },
+          "opened_at": {
+            "type": "string",
+            "title": "Opened At",
+            "description": "UTC Z. Set once at DCREQ entry; never rewritten (reopen keeps it)"
+          },
+          "closed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed At"
+          },
+          "closed_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed By"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "title": "Updated At"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "current": {
+            "type": "boolean",
+            "title": "Current",
+            "description": "status = open (and not deleted)"
+          },
+          "overdue": {
+            "type": "boolean",
+            "title": "Overdue",
+            "description": "current and opened_at more than 30 days ago"
+          },
+          "overdue_at": {
+            "type": "string",
+            "title": "Overdue At",
+            "description": "opened_at + 30 days (UTC Z)"
+          },
+          "days_open": {
+            "type": "integer",
+            "title": "Days Open",
+            "description": "Whole days since opened_at"
+          },
+          "recently_closed": {
+            "type": "boolean",
+            "title": "Recently Closed",
+            "description": "closed, and closed_at within the last 30 days"
+          },
+          "days_since_closed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Days Since Closed"
+          },
+          "unresolved_count": {
+            "type": "integer",
+            "title": "Unresolved Count",
+            "description": "Open + deferred items"
+          },
+          "deferred_count": {
+            "type": "integer",
+            "title": "Deferred Count"
+          },
+          "device_count": {
+            "type": "integer",
+            "title": "Device Count",
+            "description": "Live devices with project_id = this job"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "dcreq",
+          "name",
+          "description",
+          "site_id",
+          "primary_dcreq_id",
+          "status",
+          "opened_at",
+          "closed_at",
+          "closed_by",
+          "created_at",
+          "updated_at",
+          "created_by",
+          "current",
+          "overdue",
+          "overdue_at",
+          "days_open",
+          "recently_closed",
+          "days_since_closed",
+          "unresolved_count",
+          "deferred_count",
+          "device_count"
+        ],
+        "title": "Job"
+      },
+      "JobClose": {
+        "properties": {
+          "acknowledge_open_items": {
+            "type": "boolean",
+            "title": "Acknowledge Open Items",
+            "description": "Required (true) to close a job that still has unresolved (open or deferred) items",
+            "default": false
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "JobClose"
+      },
+      "JobCloseResult": {
+        "properties": {
+          "job": {
+            "$ref": "#/components/schemas/JobDetail"
+          },
+          "warning": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobWarning"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "job",
+          "warning"
+        ],
+        "title": "JobCloseResult"
+      },
+      "JobCreate": {
+        "properties": {
+          "dcreq": {
+            "type": "string",
+            "maxLength": 64,
+            "title": "Dcreq",
+            "description": "DCREQ000 + 4 digits (e.g. DCREQ0001234); trimmed and uppercased by the service. A bad value is 422 dcreq_format."
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "Defaults to the DCREQ"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 10000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "site_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Site Id",
+            "description": "Alias building_id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "dcreq"
+        ],
+        "title": "JobCreate"
+      },
+      "JobDetail": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "dcreq": {
+            "type": "string",
+            "title": "Dcreq"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "site_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Site Id"
+          },
+          "primary_dcreq_id": {
+            "type": "integer",
+            "title": "Primary Dcreq Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "closed"
+            ],
+            "title": "Status"
+          },
+          "opened_at": {
+            "type": "string",
+            "title": "Opened At",
+            "description": "UTC Z. Set once at DCREQ entry; never rewritten (reopen keeps it)"
+          },
+          "closed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed At"
+          },
+          "closed_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed By"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "title": "Updated At"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "current": {
+            "type": "boolean",
+            "title": "Current",
+            "description": "status = open (and not deleted)"
+          },
+          "overdue": {
+            "type": "boolean",
+            "title": "Overdue",
+            "description": "current and opened_at more than 30 days ago"
+          },
+          "overdue_at": {
+            "type": "string",
+            "title": "Overdue At",
+            "description": "opened_at + 30 days (UTC Z)"
+          },
+          "days_open": {
+            "type": "integer",
+            "title": "Days Open",
+            "description": "Whole days since opened_at"
+          },
+          "recently_closed": {
+            "type": "boolean",
+            "title": "Recently Closed",
+            "description": "closed, and closed_at within the last 30 days"
+          },
+          "days_since_closed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Days Since Closed"
+          },
+          "unresolved_count": {
+            "type": "integer",
+            "title": "Unresolved Count",
+            "description": "Open + deferred items"
+          },
+          "deferred_count": {
+            "type": "integer",
+            "title": "Deferred Count"
+          },
+          "device_count": {
+            "type": "integer",
+            "title": "Device Count",
+            "description": "Live devices with project_id = this job"
+          },
+          "unresolved_by_type": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Unresolved By Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "dcreq",
+          "name",
+          "description",
+          "site_id",
+          "primary_dcreq_id",
+          "status",
+          "opened_at",
+          "closed_at",
+          "closed_by",
+          "created_at",
+          "updated_at",
+          "created_by",
+          "current",
+          "overdue",
+          "overdue_at",
+          "days_open",
+          "recently_closed",
+          "days_since_closed",
+          "unresolved_count",
+          "deferred_count",
+          "device_count",
+          "unresolved_by_type"
+        ],
+        "title": "JobDetail"
+      },
+      "JobReopen": {
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "JobReopen"
+      },
+      "JobResult": {
+        "properties": {
+          "job": {
+            "$ref": "#/components/schemas/JobDetail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job"
+        ],
+        "title": "JobResult"
+      },
+      "JobWarning": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "unresolved_count": {
+            "type": "integer",
+            "title": "Unresolved Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "message",
+          "unresolved_count"
+        ],
+        "title": "JobWarning"
+      },
       "LoginRequest": {
         "properties": {
           "email": {
@@ -12366,6 +13308,231 @@
           "by_issue"
         ],
         "title": "NeedsReviewList"
+      },
+      "OpenItem": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "job_id": {
+            "type": "integer",
+            "title": "Job Id"
+          },
+          "dcreq": {
+            "type": "string",
+            "title": "Dcreq"
+          },
+          "item_type": {
+            "type": "string",
+            "title": "Item Type"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "deferred",
+              "resolved",
+              "dismissed"
+            ],
+            "title": "Status"
+          },
+          "target_field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Field"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "epif",
+              "cable_matrix",
+              "manual"
+            ],
+            "title": "Source"
+          },
+          "device_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Id"
+          },
+          "connection_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection Id"
+          },
+          "cable_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cable Id"
+          },
+          "import_row_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Import Row Id"
+          },
+          "filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filename",
+            "description": "Joined from the import batch (not stored)"
+          },
+          "hostname": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hostname",
+            "description": "Joined from the device (not stored)"
+          },
+          "cable_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cable Label",
+            "description": "Joined from the cable (not stored)"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "deferred_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deferred At"
+          },
+          "deferred_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deferred By"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "resolved_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved By"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "job_id",
+          "dcreq",
+          "item_type",
+          "status",
+          "target_field",
+          "note",
+          "source",
+          "device_id",
+          "connection_id",
+          "cable_id",
+          "import_row_id",
+          "filename",
+          "hostname",
+          "cable_label",
+          "created_at",
+          "created_by",
+          "deferred_at",
+          "deferred_by",
+          "resolved_at",
+          "resolved_by"
+        ],
+        "title": "OpenItem"
       },
       "ParkedTile": {
         "properties": {
