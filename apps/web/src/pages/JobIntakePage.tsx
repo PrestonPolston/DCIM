@@ -6,6 +6,7 @@ import {
   isDuplicateDcreq,
   isValidDcreq,
   itemTypeLabel,
+  countLabel,
   jobCableImportsAvailable,
   jobHref,
   jobImportsAvailable,
@@ -422,7 +423,7 @@ export default function JobIntakePage() {
         <div className="card" aria-label="Import result" role="region">
           <h2>Import result · {result.job.dcreq}</h2>
           <p role="status">
-            Job is {result.job.status}. {result.job.device_count} devices · {result.job.connection_count ?? 0} connections · {result.open_item_count} in the fill-later queue.
+            Job is {result.job.status}. {countLabel(result.job.device_count, 'device')} · {countLabel(result.job.connection_count ?? 0, 'connection')} · {result.open_item_count} in the fill-later queue.
           </p>
 
           <h3>Warnings</h3>
@@ -431,7 +432,7 @@ export default function JobIntakePage() {
               {result.warnings.map((w, i) => (
                 <li key={`${w.code}-${w.row_number ?? i}`}>
                   {w.hostname ? <span className="mono">{w.hostname}</span> : null}
-                  {w.hostname ? ' · ' : ''}{w.message}{w.item_type ? ` (${w.item_type})` : ''}
+                  {w.hostname ? ' · ' : ''}{w.message}{w.item_type ? ` (${itemTypeLabel(w.item_type)})` : ''}
                 </li>
               ))}
             </ul>

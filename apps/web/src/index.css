@@ -751,3 +751,5 @@ button.link, .link {
 .job-queue-item .actions { margin-top: var(--space-2); }
 .job-badge { display: inline-block; margin-left: var(--space-2); padding: 0 var(--space-2); border-radius: 999px; background: var(--surface-2); font-size: var(--fs-sm); }
 .job-local-note { margin: 0; }
+.job-item-note { margin: 0; white-space: pre-line; }
+.job-queue-item textarea { width: 100%; min-height: 4.5rem; }
