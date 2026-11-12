@@ -57,8 +57,20 @@ def list_references(project_id: int, session: Session = Depends(get_session)):
 @router.post("/projects/{project_id}/references", response_model=Reference, status_code=201,
              dependencies=[Depends(TECH)])
 def add_reference(project_id: int, payload: ReferenceCreate, session: Session = Depends(get_session)):
-    get_or_404(session, ProjectRow, project_id, "Project")
-    ref = ProjectReferenceRow(project_id=project_id, **payload.model_dump())
+    project = get_or_404(session, ProjectRow, project_id, "Project")
+    data = payload.model_dump()
+    if data["kind"] == "DCREQ":  # D73 format; one project per DCREQ; v1: one DCREQ per project (job intake)
+        from app.modules.jobs import service as jobs
+        data["ref"] = jobs.require_dcreq(data["ref"])
+        found = jobs.find_dcreq(session, data["ref"])
+        if found is not None:
+            raise HTTPException(status_code=409, detail=jobs.existing_job_detail(session, found))
+        has = session.exec(select(ProjectReferenceRow.id).where(ProjectReferenceRow.project_id == project.id,
+                                                                ProjectReferenceRow.kind == "DCREQ")).first()
+        if has is not None:
+            raise HTTPException(status_code=409, detail={
+                "code": "one_dcreq_per_job", "message": "A project has at most one DCREQ in v1"})
+    ref = ProjectReferenceRow(project_id=project_id, **data)
     session.add(ref)
     commit_or_409(session, "This project already has that reference")
     session.refresh(ref)
@@ -70,6 +82,9 @@ def delete_reference(project_id: int, ref_id: int, session: Session = Depends(ge
     ref = session.get(ProjectReferenceRow, ref_id)
     if ref is None or ref.project_id != project_id:
         raise HTTPException(status_code=404, detail="Reference not found")
+    if session.exec(select(ProjectRow.id).where(ProjectRow.primary_dcreq_id == ref.id)).first() is not None:
+        raise HTTPException(status_code=409, detail={
+            "code": "reference_is_job_key", "message": "This DCREQ is the job number; it can't be removed"})
     session.delete(ref)
     session.commit()
     return Response(status_code=204)
@@ -79,6 +94,8 @@ def delete_reference(project_id: int, ref_id: int, session: Session = Depends(ge
 @router.get("/project-references", response_model=list[Reference])
 def find_references(kind: str = Query(..., max_length=8), ref: str = Query(..., max_length=64),
                     session: Session = Depends(get_session)):
+    if kind.upper() == "DCREQ":
+        ref = ref.strip().upper()
     return session.exec(select(ProjectReferenceRow).join(ProjectRow, ProjectRow.id == ProjectReferenceRow.project_id)
                         .where(ProjectReferenceRow.kind == kind.upper(), ProjectReferenceRow.ref == ref,
                                ProjectRow.deleted_at.is_(None))).all()
