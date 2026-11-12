@@ -9,13 +9,14 @@ export type Action =
   | 'profile.publish' // publish, retire, new version, delete (admin)
   | 'rack.move'
   | 'cabinetProfile.write' // create, edit, publish, retire, un-retire, clone, delete cabinet profiles (admin only, admin-setup.md §1)
-  | 'job.write' // start a job, upload intake files, work the fill-later queue (tech or admin)
+  | 'job.write' // start, close, and reopen a job; intake uploads (tech or admin)
+  | 'job.track' // complete, hold, or dismiss fill-later items (any signed-in role that can track the job)
   | 'admin' // /users, /audit-events, locations CRUD
 
 const MATRIX: Record<string, Action[]> = {
-  admin: ['device.write', 'device.delete', 'profile.publish', 'device.import', 'device.export', 'deviceType.create', 'rack.move', 'cabinetProfile.write', 'job.write', 'admin'],
-  technician: ['device.write', 'device.import', 'device.export', 'deviceType.create', 'rack.move', 'job.write'],
-  'read-only': ['device.export'],
+  admin: ['device.write', 'device.delete', 'profile.publish', 'device.import', 'device.export', 'deviceType.create', 'rack.move', 'cabinetProfile.write', 'job.write', 'job.track', 'admin'],
+  technician: ['device.write', 'device.import', 'device.export', 'deviceType.create', 'rack.move', 'job.write', 'job.track'],
+  'read-only': ['device.export', 'job.track'],
 }
 
 export function can(role: string | undefined | null, action: Action): boolean {
