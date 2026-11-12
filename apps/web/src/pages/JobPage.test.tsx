@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { screen, within } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import App from '../App'
 import { jobIntakeApi } from '../api/jobIntake'
@@ -31,10 +31,10 @@ describe('job detail', () => {
     expect(await screen.findByRole('heading', { name: 'DCREQ0004444' })).toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent('Leaf refresh · open')
     expect(screen.getByRole('heading', { name: 'Fill-later queue' })).toBeInTheDocument()
-    const positions = await screen.findByRole('region', { name: 'missing position' })
+    const positions = await screen.findByRole('region', { name: 'Missing position' })
     expect(positions).toHaveTextContent('leaf-04')
     expect(positions).toHaveTextContent('leaf-12')
-    expect(screen.getByRole('region', { name: 'cable matrix not uploaded' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Cable matrix not uploaded' })).toBeInTheDocument()
   })
 
   it('warns on close when items remain, then closes after acknowledgement and can reopen', async () => {
@@ -44,7 +44,8 @@ describe('job detail', () => {
     await screen.findByRole('heading', { name: 'DCREQ0004444' })
     await user.click(screen.getByRole('button', { name: 'Close job' }))
     const banner = await screen.findByRole('alert')
-    expect(banner).toHaveTextContent(/3 unresolved items/)
+    expect(banner).toHaveTextContent('This job still has 3 unresolved items. You can close it anyway.')
+    expect(banner).not.toHaveTextContent('acknowledge_open_items')
     expect((await jobIntakeApi().getJob('DCREQ0004444')).status).toBe('open')
     await user.click(within(banner).getByRole('button', { name: 'Close anyway' }))
     expect(await screen.findByRole('button', { name: 'Reopen' })).toBeInTheDocument()
@@ -56,19 +57,39 @@ describe('job detail', () => {
     expect(reopened.opened_at).toBeTruthy()
   })
 
-  it('lets a read-only user complete an item and hides close', async () => {
+  it('lets a read-only user view the queue but hides close and item actions', async () => {
     seedRole('read-only')
+    await seedJobWithQueue()
+    renderWithProviders(<App />, '/jobs/DCREQ0004444')
+    await screen.findByRole('heading', { name: 'Fill-later queue' })
+    expect(await screen.findByRole('region', { name: 'Missing position' })).toHaveTextContent('leaf-04')
+    expect(screen.queryByRole('button', { name: 'Close job' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Complete' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Fill' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Hold' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Dismiss' })).toBeNull()
+  })
+
+  it('Fill writes the field then resolves, and the header count stays consistent on every tab', async () => {
     await seedJobWithQueue()
     const user = userEvent.setup()
     renderWithProviders(<App />, '/jobs/DCREQ0004444')
     await screen.findByRole('heading', { name: 'Fill-later queue' })
-    expect(screen.queryByRole('button', { name: 'Close job' })).toBeNull()
-    const positions = await screen.findByRole('region', { name: 'missing position' })
-    await user.click(within(positions).getAllByRole('button', { name: 'Complete' })[0])
-    await user.click(screen.getByRole('tab', { name: 'Resolved' }))
-    expect(await screen.findByRole('region', { name: 'missing position' })).toHaveTextContent('leaf-04')
-    expect(await jobIntakeApi().listOpenItems((await jobIntakeApi().getJob('DCREQ0004444')).id, 'resolved')).toMatchObject({
-      total: 1,
+    expect(screen.getByTestId('job-queue-summary')).toHaveTextContent('3 in the fill-later queue')
+    const positions = await screen.findByRole('region', { name: 'Missing position' })
+    await user.click(within(positions).getAllByRole('button', { name: 'Fill' })[0])
+    await user.type(screen.getByLabelText('Value for position_u'), '42')
+    await user.click(screen.getByRole('button', { name: 'Save and resolve' }))
+    await waitFor(() => {
+      expect(screen.getByTestId('job-queue-summary')).toHaveTextContent('2 in the fill-later queue')
     })
+    await user.click(screen.getByRole('tab', { name: /^Resolved$/ }))
+    expect(await screen.findByRole('region', { name: 'Missing position' })).toHaveTextContent('leaf-04')
+    expect(screen.getByText(/position_u set to 42/)).toBeInTheDocument()
+    expect(screen.getByTestId('job-queue-summary')).toHaveTextContent('2 in the fill-later queue')
+    const job = await jobIntakeApi().getJob('DCREQ0004444')
+    expect(job.unresolved_count).toBe(2)
+    const resolved = await jobIntakeApi().listOpenItems(job.id, 'resolved')
+    expect(resolved.items[0]).toMatchObject({ filled_value: '42', status: 'resolved' })
   })
 })

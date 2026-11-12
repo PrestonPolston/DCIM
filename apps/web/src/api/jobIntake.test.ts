@@ -11,6 +11,8 @@ import {
   isJobHasOpenItems,
   isJobOverdue,
   isValidDcreq,
+  closeOpenItemsWarning,
+  itemTypeLabel,
   jobHref,
   jobIntakeApi,
   jobOverdueAt,
@@ -234,5 +236,45 @@ describe('abandon', () => {
     await api().commitIntake(job.id)
     await expect(api().abandonJob(job.id)).rejects.toMatchObject({ status: 409, code: 'job_not_empty' })
     expect((await api().getJob(job.id)).status).toBe('open')
+  })
+})
+
+describe('item labels and close warning copy', () => {
+  it('uses readable labels instead of raw type names', () => {
+    expect(itemTypeLabel('epif_not_uploaded')).toBe('ePIF not uploaded')
+    expect(itemTypeLabel('cable_matrix_not_uploaded')).toBe('Cable matrix not uploaded')
+    expect(itemTypeLabel('missing_position')).toBe('Missing position')
+  })
+
+  it('uses the friendly errors.ts text for closeOpenItemsWarning, not the API field name', () => {
+    const err = new ApiError(409, 'Close again with acknowledge_open_items=true to close it anyway.', {
+      detail: { code: 'job_has_open_items', message: 'Close again with acknowledge_open_items=true to close it anyway.', unresolved_count: 2 },
+    })
+    const warning = closeOpenItemsWarning(err)
+    expect(warning?.message).toBe('This job still has 2 unresolved items. You can close it anyway.')
+    expect(warning?.message).not.toMatch(/acknowledge_open_items/)
+    expect(warning?.unresolved_count).toBe(2)
+  })
+})
+
+describe('fill item', () => {
+  it('writes the field value first and then resolves the item', async () => {
+    const job = await api().createJob('DCREQ0006001')
+    const seeded = (await api().listOpenItems(job.id, 'unresolved')).items[0]
+    // add a field-bearing item
+    const { seedMockOpenItem } = await import('./jobIntake.mock')
+    const item = seedMockOpenItem({
+      job_id: job.id,
+      item_type: 'missing_position',
+      hostname: 'leaf-04',
+      target_field: 'position_u',
+      import_row_id: 99,
+    })
+    const filled = await api().fillItem(job.id, item.id, '42')
+    expect(filled.status).toBe('resolved')
+    expect(filled.filled_value).toBe('42')
+    expect(filled.note).toBe('position_u=42')
+    expect((await api().getJob(job.id)).unresolved_count).toBe(2) // two not-uploaded items remain; seeded item resolved
+    void seeded
   })
 })
