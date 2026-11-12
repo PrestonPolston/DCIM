@@ -130,6 +130,28 @@ describe('job detail', () => {
     expect(note).toHaveClass('job-item-note')
   })
 
+  it('renders a formula-prefixed, tagged, tabbed note as literal text with pre-wrap', async () => {
+    const job = seedMockJob({ dcreq: 'DCREQ0005556', name: 'Notes', device_count: 1 })
+    const raw = '=HYPERLINK("x")\n<b>hi</b>\tz'
+    seedMockOpenItem({
+      job_id: job.id,
+      item_type: 'pdu_missing',
+      hostname: 'web11',
+      note: raw,
+      filename: 'epif.csv',
+      import_row_id: 1,
+    })
+    renderWithProviders(<App />, '/jobs/DCREQ0005556')
+    const region = await screen.findByRole('region', { name: 'Missing PDU' })
+    const note = region.querySelector('.job-item-note')
+    expect(note).toBeTruthy()
+    expect(note!.textContent).toBe(raw)
+    expect(note!.querySelector('b')).toBeNull()
+    expect(note!.innerHTML).toContain('&lt;b&gt;')
+    expect(note!.innerHTML).not.toMatch(/<b>/)
+    expect(note).toHaveClass('job-item-note')
+  })
+
 
   it('shows cable label and trail on cable-matrix queue items', async () => {
     const job = seedMockJob({ dcreq: 'DCREQ0006666', name: 'Cables', connection_count: 1 })

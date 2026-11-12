@@ -74,7 +74,7 @@ function CableRowsTable({ rows, caption }: { rows: ImportRow[]; caption: string 
             <td className="mono">{row.a ?? '—'}</td>
             <td className="mono">{row.z ?? '—'}</td>
             <td>{row.result}</td>
-            <td>{reasonText(row.messages)}</td>
+            <td className="user-text">{reasonText(row.messages)}</td>
           </tr>
         ))}
       </tbody>
@@ -101,7 +101,7 @@ function CommitRowsTable({ rows, caption, kind }: { rows: Array<CommitRow | Skip
               <td>{row.row_number}</td>
               <td className="mono">{row.a ?? (kind === 'skipped' && !row.z ? (row.hostname ?? '—') : '—')}</td>
               <td className="mono">{row.z ?? '—'}</td>
-              <td>
+              <td className="user-text">
                 {kind === 'committed'
                   ? (('cable_label' in row ? row.cable_label : null) ?? ('label' in row ? row.label : null) ?? '—')
                   : reasonText(messages)}
@@ -567,7 +567,7 @@ export default function JobIntakePage() {
           {result.warnings.length === 0 ? <p className="hint">No warnings.</p> : (
             <ul>
               {result.warnings.map((w, i) => (
-                <li key={`${w.code}-${w.row_number ?? i}`}>
+                <li key={`${w.code}-${w.row_number ?? i}`} className="user-text">
                   {w.hostname ? <span className="mono">{w.hostname}</span> : null}
                   {w.hostname ? ' · ' : ''}{w.message}{w.item_type ? ` (${itemTypeLabel(w.item_type)})` : ''}
                 </li>
@@ -602,7 +602,7 @@ export default function JobIntakePage() {
                     <td>{row.row_number}</td>
                     <td className="mono">{row.a ?? (row.z ? '—' : (row.hostname ?? '—'))}</td>
                     <td className="mono">{row.z ?? '—'}</td>
-                    <td>{reasonText(row.messages)}</td>
+                    <td className="user-text">{reasonText(row.messages)}</td>
                   </tr>
                 ))}
               </tbody>

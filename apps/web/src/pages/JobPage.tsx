@@ -168,7 +168,7 @@ export default function JobPage() {
             )}
             {canWrite && closeWarning && (
               <div className="banner" role="alert">
-                <p>{closeWarning.message}</p>
+                <p className="user-text">{closeWarning.message}</p>
                 <div className="actions">
                   <button type="button" onClick={() => setCloseWarning(null)}>Keep working</button>
                   <button type="button" className="primary" disabled={closeMut.isPending} onClick={() => closeMut.mutate(true)}>
@@ -229,7 +229,7 @@ export default function JobPage() {
                       )}
                       {item.note && <p className="hint job-item-note">{item.note}</p>}
                       {item.filled_value && item.target_field && (
-                        <p className="hint">{fieldLabel(item.target_field)} set to {item.filled_value}</p>
+                        <p className="hint user-text">{fieldLabel(item.target_field)} set to {item.filled_value}</p>
                       )}
                       {canWrite && (item.status === 'open' || item.status === 'deferred') && (
                         <div className="actions">
