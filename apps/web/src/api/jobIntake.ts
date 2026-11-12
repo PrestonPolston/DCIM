@@ -11,6 +11,8 @@ import { createMockJobIntakeApi } from './jobIntake.mock'
 export const JOB_INTAKE_API = {
   /** true = real /jobs endpoints; false = in-memory mock (tests and VITE_JOB_INTAKE_LIVE=false). */
   live: import.meta.env.VITE_JOB_INTAKE_LIVE !== 'false',
+  /** true = POST defer/undefer/dismiss/resolve. Backend slice 1 has GET only; default is a local overlay. */
+  openItemWrites: import.meta.env.VITE_JOB_INTAKE_ITEM_WRITES === 'true',
 }
 
 export const DCREQ_PATTERN = /^DCREQ000[0-9]{4}$/
@@ -241,16 +243,50 @@ export function daysBetween(iso: string | null | undefined, now = Date.now()): n
   return d ? Math.floor((now - d.getTime()) / DAY_MS) : null
 }
 
-/** Strictly more than JOB_OVERDUE_DAYS, matching opened_at < now - 30 days. */
-export function isJobOverdue(job: Pick<Job, 'status' | 'opened_at'>, now = Date.now()): boolean {
+/** opened_at + 30 days (UTC Z), the committed `overdue_at` field. */
+export function jobOverdueAt(openedAt: string | null | undefined): string | undefined {
+  const opened = parseApiDate(openedAt)
+  if (!opened) return undefined
+  return new Date(opened.getTime() + JOB_OVERDUE_DAYS * DAY_MS).toISOString()
+}
+
+/**
+ * Open more than 30 days. Prefers `overdue_at` (opened_at + 30 days) when present;
+ * otherwise opened_at < now - 30 days. Closed jobs are never overdue.
+ */
+export function isJobOverdue(job: Pick<Job, 'status' | 'opened_at'> & { overdue_at?: string }, now = Date.now()): boolean {
   if (job.status !== 'open') return false
-  const opened = parseApiDate(job.opened_at)
-  if (!opened) return false
-  return opened.getTime() < now - JOB_OVERDUE_DAYS * DAY_MS
+  const dueIso = job.overdue_at ?? jobOverdueAt(job.opened_at)
+  const due = parseApiDate(dueIso)
+  return !!due && due.getTime() < now
 }
 
 export function isDuplicateDcreq(e: unknown): e is ApiError {
   return e instanceof ApiError && e.status === 409 && (e.code === 'duplicate_dcreq' || e.code === 'job_exists')
+}
+
+export function isJobHasOpenItems(e: unknown): e is ApiError {
+  return e instanceof ApiError && e.status === 409 && e.code === 'job_has_open_items'
+}
+
+export function closeOpenItemsWarning(e: unknown): CloseWarning | null {
+  if (!isJobHasOpenItems(e)) return null
+  const d = errorDetail(e.detail)
+  return {
+    code: 'job_has_open_items',
+    message: d?.message ?? e.message,
+    unresolved_count: d?.unresolved_count ?? 0,
+  }
+}
+
+export function matchesOpenItemFilter(status: OpenItemStatus, filter: OpenItemListStatus): boolean {
+  if (filter === 'all') return true
+  if (filter === 'unresolved') return status === 'open' || status === 'deferred'
+  return status === filter
+}
+
+export function humanizeItemType(type: string): string {
+  return type.replaceAll('_', ' ')
 }
 
 export function duplicateExisting(e: unknown): ExistingJobRef | null {
@@ -331,9 +367,84 @@ let mock = createMockJobIntakeApi()
 
 export function resetJobIntakeMock(): void {
   mock = createMockJobIntakeApi()
+  resetOpenItemOverlay()
+}
+
+const itemOverlay = new Map<string, JobOpenItem>()
+
+export function resetOpenItemOverlay(): void {
+  itemOverlay.clear()
+}
+
+function overlayKey(jobId: number, itemId: number) {
+  return `${jobId}:${itemId}`
+}
+
+function withLocalItemWrites(base: JobIntakeApi, actor = 'local'): JobIntakeApi {
+  const stamp = () => new Date().toISOString()
+  const overlayOf = (jobId: number, item: JobOpenItem) => itemOverlay.get(overlayKey(jobId, item.id)) ?? item
+  async function sourceItem(jobId: number, itemId: number): Promise<JobOpenItem> {
+    const hit = itemOverlay.get(overlayKey(jobId, itemId))
+    if (hit) return hit
+    const page = await base.listOpenItems(jobId, 'all')
+    const found = page.items.find((i) => i.id === itemId)
+    if (!found) {
+      throw new ApiError(404, 'Open item not found', { detail: { code: 'not_found', message: 'Open item not found' } })
+    }
+    return found
+  }
+  function save(jobId: number, item: JobOpenItem) {
+    itemOverlay.set(overlayKey(jobId, item.id), item)
+    return item
+  }
+  return {
+    ...base,
+    async listOpenItems(jobId, status = 'unresolved') {
+      const page = await base.listOpenItems(jobId, 'all')
+      const byId = new Map(page.items.map((i) => [i.id, overlayOf(jobId, i)]))
+      for (const [key, item] of itemOverlay) {
+        if (item.job_id === jobId || key.startsWith(`${jobId}:`)) byId.set(item.id, item)
+      }
+      const items = [...byId.values()].filter((i) => matchesOpenItemFilter(i.status, status))
+      return { items, total: items.length }
+    },
+    async deferItem(jobId, itemId, note = null) {
+      const item = await sourceItem(jobId, itemId)
+      return save(jobId, {
+        ...item,
+        status: 'deferred',
+        note: note != null ? note : item.note,
+        deferred_at: stamp(),
+        deferred_by: actor,
+      })
+    },
+    async undeferItem(jobId, itemId) {
+      const item = await sourceItem(jobId, itemId)
+      return save(jobId, { ...item, status: 'open', deferred_at: null, deferred_by: null })
+    },
+    async dismissItem(jobId, itemId, note) {
+      if (!note || !note.trim()) {
+        throw new ApiError(422, 'A note is required to dismiss an item.', { detail: { code: 'validation', message: 'A note is required to dismiss an item.' } })
+      }
+      const item = await sourceItem(jobId, itemId)
+      return save(jobId, {
+        ...item,
+        status: 'dismissed',
+        note,
+        resolved_at: stamp(),
+        resolved_by: actor,
+      })
+    },
+    async resolveItem(jobId, itemId) {
+      const item = await sourceItem(jobId, itemId)
+      return save(jobId, { ...item, status: 'resolved', resolved_at: stamp(), resolved_by: actor })
+    },
+  }
 }
 
 export function jobIntakeApi(): JobIntakeApi {
-  return JOB_INTAKE_API.live ? liveApi() : mock
+  if (!JOB_INTAKE_API.live) return mock
+  const live = liveApi()
+  return JOB_INTAKE_API.openItemWrites ? live : withLocalItemWrites(live)
 }
 

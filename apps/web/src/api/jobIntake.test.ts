@@ -8,10 +8,12 @@ import {
   daysBetween,
   duplicateExisting,
   isDuplicateDcreq,
+  isJobHasOpenItems,
   isJobOverdue,
   isValidDcreq,
   jobHref,
   jobIntakeApi,
+  jobOverdueAt,
   normalizeDcreq,
   resetJobIntakeMock,
 } from './jobIntake'
@@ -98,6 +100,9 @@ describe('overdue flag', () => {
     expect(isJobOverdue({ status: 'open', opened_at: '2026-10-13T13:00:00Z' }, now)).toBe(false)
     expect(isJobOverdue({ status: 'open', opened_at: '2026-10-14T13:00:00Z' }, now)).toBe(false)
     expect(isJobOverdue({ status: 'closed', opened_at: '2026-09-01T13:00:00Z' }, now)).toBe(false)
+    expect(isJobOverdue({ status: 'open', opened_at: '2026-11-01T13:00:00Z', overdue_at: '2026-11-12T12:59:59Z' }, now)).toBe(true)
+    expect(isJobOverdue({ status: 'open', opened_at: '2026-09-01T13:00:00Z', overdue_at: '2026-11-12T13:00:00Z' }, now)).toBe(false)
+    expect(jobOverdueAt('2026-10-13T13:00:00Z')).toBe('2026-11-12T13:00:00.000Z')
     expect(daysBetween('2026-11-07T13:00:00Z', now)).toBe(5)
     expect(JOB_OVERDUE_DAYS).toBe(30)
   })
@@ -107,6 +112,7 @@ describe('overdue flag', () => {
     const listed = await api().listJobs({ overdue: true })
     expect(listed.total).toBe(1)
     expect(listed.items[0].overdue).toBe(true)
+    expect(listed.items[0].overdue_at).toBeTruthy()
     expect(listed.items[0].days_open).toBeGreaterThanOrEqual(40)
     await api().closeJob(listed.items[0].id)
     const reopened = await api().reopenJob(listed.items[0].id)
@@ -118,11 +124,21 @@ describe('overdue flag', () => {
 })
 
 describe('close with open items', () => {
-  it('closes the job and returns a job_has_open_items warning when items remain', async () => {
+  it('refuses close with 409 job_has_open_items, then closes when acknowledged', async () => {
     const job = await api().createJob('DCREQ0003001')
     await api().skipFile(job.id, 'cable_matrix')
     await api().commitIntake(job.id)
-    const result = await api().closeJob(job.id)
+    let err: unknown
+    try {
+      await api().closeJob(job.id)
+    } catch (e) {
+      err = e
+    }
+    expect(isJobHasOpenItems(err)).toBe(true)
+    expect((err as ApiError).status).toBe(409)
+    expect(errorDetail((err as ApiError).detail)?.unresolved_count).toBe(1)
+    expect((await api().getJob(job.id)).status).toBe('open')
+    const result = await api().closeJob(job.id, { acknowledge_open_items: true })
     expect(result.job.status).toBe('closed')
     expect(result.job.current).toBe(false)
     expect(result.job.overdue).toBe(false)

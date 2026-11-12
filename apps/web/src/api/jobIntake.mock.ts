@@ -7,6 +7,7 @@ import {
   daysBetween,
   isJobOverdue,
   isValidDcreq,
+  jobOverdueAt,
   normalizeDcreq,
   type ImportKind,
   type ImportRow,
@@ -61,7 +62,8 @@ function flags(job: Job, now = Date.now()): Job {
   return {
     ...job,
     current,
-    overdue: isJobOverdue(job, now),
+    overdue_at: job.overdue_at ?? jobOverdueAt(job.opened_at),
+    overdue: isJobOverdue({ ...job, overdue_at: job.overdue_at ?? jobOverdueAt(job.opened_at) }, now),
     days_open: daysOpen,
     recently_closed: job.status === 'closed' && daysSinceClosed != null && daysSinceClosed <= JOB_OVERDUE_DAYS,
     days_since_closed: job.status === 'closed' ? daysSinceClosed : null,
@@ -197,6 +199,34 @@ export function seedMockJob(init: Partial<Job> & { dcreq: string }): Job {
   return flags(job)
 }
 
+export function seedMockOpenItem(init: Partial<JobOpenItem> & { job_id: number; item_type: OpenItemType }): JobOpenItem {
+  const job = findJob(init.job_id)
+  return addItem({
+    job_id: job.id,
+    dcreq: job.dcreq,
+    item_type: init.item_type,
+    status: init.status ?? 'open',
+    target_field: init.target_field ?? null,
+    note: init.note ?? null,
+    source: init.source ?? 'manual',
+    epif_request_id: init.epif_request_id ?? null,
+    device_id: init.device_id ?? null,
+    device_psu_assignment_id: init.device_psu_assignment_id ?? null,
+    connection_id: init.connection_id ?? null,
+    cable_id: init.cable_id ?? null,
+    import_row_id: init.import_row_id ?? null,
+    filename: init.filename ?? null,
+    hostname: init.hostname ?? null,
+    cable_label: init.cable_label ?? null,
+    trail: init.trail ?? null,
+    created_by: init.created_by ?? ACTOR,
+    deferred_at: init.deferred_at ?? null,
+    deferred_by: init.deferred_by ?? null,
+    resolved_at: init.resolved_at ?? null,
+    resolved_by: init.resolved_by ?? null,
+  })
+}
+
 export function createMockJobIntakeApi(): JobIntakeApi {
   store = empty()
   return {
@@ -235,9 +265,18 @@ export function createMockJobIntakeApi(): JobIntakeApi {
       const lim = params.limit ?? 50
       return { items: items.slice(off, off + lim), total }
     },
-    async closeJob(id) {
+    async closeJob(id, opts = {}) {
       const job = findJob(id)
+      if (job.status === 'closed') throwApi(409, 'job_already_closed', 'This job is already closed', { closed_at: job.closed_at })
       const unresolved = flags(job).unresolved_count
+      if (unresolved && !opts.acknowledge_open_items) {
+        throwApi(
+          409,
+          'job_has_open_items',
+          `This job still has ${unresolved} unresolved item${unresolved === 1 ? '' : 's'}. Close again with acknowledge_open_items=true to close it anyway.`,
+          { unresolved_count: unresolved },
+        )
+      }
       job.status = 'closed'
       job.closed_at = iso()
       job.closed_by = ACTOR
@@ -250,6 +289,7 @@ export function createMockJobIntakeApi(): JobIntakeApi {
     },
     async reopenJob(id) {
       const job = findJob(id)
+      if (job.status === 'open') throwApi(409, 'job_already_open', 'This job is already open')
       job.status = 'open'
       job.closed_at = null
       job.closed_by = null

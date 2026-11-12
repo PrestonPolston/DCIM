@@ -31,6 +31,10 @@ const COPY: Record<string, string> = {
   import_forbidden_columns: 'This file has forbidden columns. Remove those columns and upload again. Secrets are never stored.',
   unknown_columns: 'This file has unknown columns. Remove them and upload again.',
   job_not_empty: 'This job already has committed work, so it can’t be deleted. Close it instead.',
+  job_has_open_items: 'This job still has unresolved items. Close again to close it anyway.',
+  job_already_closed: 'This job is already closed.',
+  job_already_open: 'This job is already open.',
+  job_not_found: 'Job not found.',
 }
 /** 409 on editing a flagged device: the code is its needs_review_reason (lifecycle.py _check_flagged_edit). */
 const FLAGGED: Record<string, string> = {
