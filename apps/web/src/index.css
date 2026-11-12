@@ -761,4 +761,5 @@ button.link, .link {
   resize: none; overflow-x: auto; overflow-y: hidden; white-space: pre; field-sizing: fixed; line-height: calc(var(--tap) - 2px);
 }
 .job-intake-oneline[aria-invalid='true'] { overflow-y: auto; white-space: pre-wrap; }
+.muted { color: var(--text-2); }
 .job-queue-item textarea { width: 100%; min-height: 4.5rem; }

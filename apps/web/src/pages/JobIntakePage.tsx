@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router'
 import {
   JOB_INTAKE_MAX_FILE_BYTES,
@@ -87,6 +87,15 @@ function rowHost(row: CommitRow | SkippedConflictRow): string | null {
   return row.hostname ?? (('epif_id' in row ? row.epif_id : null) ?? null)
 }
 
+function hostLabel(row: CommitRow | SkippedConflictRow): ReactNode {
+  if (row.hostname) return row.hostname
+  const epifId = 'epif_id' in row ? row.epif_id : null
+  if (isEpifRow(row) && epifId) {
+    return <span className="muted">ePIF row {epifId}</span>
+  }
+  return '—'
+}
+
 function isEpifRow(row: CommitRow | SkippedConflictRow): boolean {
   return row.kind === 'epif'
 }
@@ -116,7 +125,7 @@ function CommitRowsTable({ rows, caption, kind }: { rows: Array<CommitRow | Skip
           return (
             <tr key={`${row.import_id}-${row.row_number}`}>
               <td>{row.row_number}</td>
-              {showHost ? <td className="mono">{rowHost(row) ?? '—'}</td> : null}
+              {showHost ? <td className="mono">{hostLabel(row)}</td> : null}
               <td className="mono">{end(row.a)}</td>
               <td className="mono">{end(row.z)}</td>
               <td className="user-text">

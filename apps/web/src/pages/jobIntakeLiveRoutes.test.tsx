@@ -342,6 +342,14 @@ function installSlice2JobsApi() {
           hostname: 'ghost-host',
           reasons: [{ code: 'missing_hostname', field: null, message: 'A or Z end could not be resolved.', level: 'held' }],
         })
+        held.push({
+          import_id: epifBatches[0].id,
+          kind: 'epif',
+          row_number: 6,
+          hostname: null,
+          epif_id: '30003',
+          reasons: [{ code: 'missing_hostname', field: null, message: 'Host name is missing.', level: 'held' }],
+        })
         skipped.push({
           import_id: epifBatches[0].id,
           kind: 'epif',
@@ -646,6 +654,8 @@ describe('job intake live slice 2 routes (mocked fetch)', () => {
     const heldTable = within(result).getByRole('table', { name: 'Held rows' })
     expect(heldTable).toHaveTextContent('ghost-host')
     expect(heldTable).toHaveTextContent('n/a')
+    expect(heldTable).toHaveTextContent('ePIF row 30003')
+    expect(heldTable.querySelector('.muted')).toHaveTextContent('ePIF row 30003')
     expect(result).toHaveTextContent('Missing PDU')
     expect(result).toHaveTextContent('Missing position')
     expect(result.textContent).not.toMatch(/\(pdu_missing\)/)

@@ -738,6 +738,7 @@ export function createMockJobIntakeApi(): JobIntakeApi {
         : rows.map((cells, i) => {
         const hostname = col(headers, cells, 'hostname', 'host_name', 'name', 'a name')
         const label = col(headers, cells, 'label', 'cable label', 'trail')
+        const epif_id = col(headers, cells, 'epif_id', 'epif id', 'id')
         const marked = (col(headers, cells, 'result') ?? '').toLowerCase() as ImportRowResult | ''
         let result: ImportRowResult = marked && ['ready', 'warning', 'held', 'conflict'].includes(marked)
           ? marked
@@ -753,7 +754,7 @@ export function createMockJobIntakeApi(): JobIntakeApi {
         } else if (result === 'conflict' && !messages.length) {
           messages.push({ code: 'hostname_conflict', field: 'hostname', message: 'This row conflicts with a live record.' })
         }
-        return { id: store.nextRow++, row_number: i + 1, result, messages, hostname, label }
+        return { id: store.nextRow++, row_number: i + 1, result, messages, hostname, label, epif_id }
       })
       const batch: JobImport = {
         id: store.nextImport++,

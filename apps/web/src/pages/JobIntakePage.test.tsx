@@ -190,6 +190,27 @@ ghost-host,held
     expect(within(result).getByRole('link', { name: 'srv-ready' })).toHaveAttribute('href', '/devices?q=srv-ready')
   })
 
+  it('labels a held ePIF row without a hostname as ePIF row <id> in muted text', async () => {
+    const user = userEvent.setup()
+    await startJob(user, 'DCREQ0003335')
+    const heldEpif = `id,hostname,result
+1,srv-ready,ready
+30003,,held
+`
+    await user.upload(screen.getByLabelText('Space & Power (ePIF) CSV'), csv('epif.csv', heldEpif))
+    expect(await screen.findByRole('status')).toHaveTextContent('epif.csv: 2 rows')
+    await user.click(screen.getByRole('button', { name: 'Next: Cable matrix' }))
+    await user.click(screen.getByRole('button', { name: 'Skip cable matrix' }))
+    await user.click(screen.getByRole('button', { name: 'Next: Preview' }))
+    await user.click(screen.getByRole('button', { name: /Commit job/ }))
+    const result = await screen.findByRole('region', { name: 'Import result' })
+    const heldTable = within(result).getByRole('table', { name: 'Held rows' })
+    expect(heldTable).toHaveTextContent('ePIF row 30003')
+    expect(heldTable).toHaveTextContent('n/a')
+    const muted = heldTable.querySelector('.muted')
+    expect(muted).toHaveTextContent('ePIF row 30003')
+  })
+
   it('uses a one-line Description, keeps pasted line breaks and tabs, and shows a one-line hint', async () => {
     const user = userEvent.setup()
     renderWithProviders(<App />, '/jobs/new')
