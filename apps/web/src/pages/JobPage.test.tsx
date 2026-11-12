@@ -85,11 +85,48 @@ describe('job detail', () => {
     })
     await user.click(screen.getByRole('tab', { name: /^Resolved$/ }))
     expect(await screen.findByRole('region', { name: 'Missing position' })).toHaveTextContent('leaf-04')
-    expect(screen.getByText(/position_u set to 42/)).toBeInTheDocument()
+    expect(screen.getByText(/position \(U\) set to 42/)).toBeInTheDocument()
     expect(screen.getByTestId('job-queue-summary')).toHaveTextContent('2 in the fill-later queue')
     const job = await jobIntakeApi().getJob('DCREQ0004444')
     expect(job.unresolved_count).toBe(2)
     const resolved = await jobIntakeApi().listOpenItems(job.id, 'resolved')
     expect(resolved.items[0]).toMatchObject({ filled_value: '42', status: 'resolved' })
+  })
+
+
+  it('tells you Complete does not write a tied field, and mock Fill still writes the value', async () => {
+    await seedJobWithQueue()
+    const user = userEvent.setup()
+    renderWithProviders(<App />, '/jobs/DCREQ0004444')
+    const positions = await screen.findByRole('region', { name: 'Missing position' })
+    expect(within(positions).getAllByRole('note')[0]).toHaveTextContent("Complete marks this resolved. It doesn't write position (U).")
+    expect(screen.getByRole('region', { name: 'Cable matrix not uploaded' }).querySelector('[role="note"]')).toBeNull()
+    expect(within(positions).getAllByRole('button', { name: 'Fill' }).length).toBeGreaterThan(0)
+    expect(screen.queryByRole('button', { name: 'Resolve with note' })).toBeNull()
+    await user.click(within(positions).getAllByRole('button', { name: 'Fill' })[0])
+    expect(screen.getByLabelText('Value for position_u')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Note')).toBeNull()
+  })
+
+  it('keeps line breaks in item notes and pluralizes 1 device', async () => {
+    const job = seedMockJob({ dcreq: 'DCREQ0005555', name: 'One device', device_count: 1, connection_count: 1 })
+    seedMockOpenItem({
+      job_id: job.id,
+      item_type: 'pdu_missing',
+      hostname: 'web11',
+      note: 'Held over.\nCheck PDU 2.',
+      filename: 'epif.csv',
+      import_row_id: 1,
+    })
+    renderWithProviders(<App />, '/jobs/DCREQ0005555')
+    await screen.findByRole('heading', { name: 'DCREQ0005555' })
+    expect(await screen.findByRole('region', { name: 'Missing PDU' })).toHaveTextContent('web11')
+    expect(screen.getByTestId('job-queue-summary').textContent).toMatch(/1 device · 1 connection/)
+    expect(screen.getByTestId('job-queue-summary').textContent).not.toMatch(/1 devices/)
+    expect(screen.getByTestId('job-queue-summary').textContent).not.toMatch(/1 connections/)
+    const note = document.querySelector('.job-item-note')
+    expect(note).toBeTruthy()
+    expect(note?.textContent).toBe('Held over.\nCheck PDU 2.')
+    expect(note).toHaveClass('job-item-note')
   })
 })

@@ -259,7 +259,10 @@ function installSlice2JobsApi() {
           hostname: 'web01',
           reasons: [{ code: 'hostname_conflict', field: 'hostname', message: 'Hostname already used.', level: 'conflict', item_type: 'other' }],
         }],
-        warnings: [{ code: 'missing_position', message: 'No RU.', field: 'position_u', item_type: 'missing_position', target_field: 'position_u', import_id: batches[0].id, row_number: 2, hostname: 'nopos' }],
+        warnings: [
+          { code: 'missing_position', message: 'No RU.', field: 'position_u', item_type: 'missing_position', target_field: 'position_u', import_id: batches[0].id, row_number: 2, hostname: 'nopos' },
+          { code: 'pdu_missing', message: 'No PDU.', field: 'psu_1', item_type: 'pdu_missing', target_field: 'psu_1', import_id: batches[0].id, row_number: 4, hostname: 'web11' },
+        ],
         open_items_created: [pos.id],
         open_item_count: view.unresolved_count,
         resolved_item_ids: epif ? [epif.id] : [],
@@ -448,20 +451,36 @@ describe('job intake live slice 2 routes (mocked fetch)', () => {
     const skipped = within(result).getByRole('table', { name: 'Skipped conflict rows' })
     expect(skipped).toHaveTextContent('web01')
     expect(skipped).toHaveTextContent('Hostname already used.')
+    expect(result.textContent).toMatch(/1 device ·/)
+    expect(result.textContent).not.toMatch(/1 devices/)
+    expect(result).toHaveTextContent('Missing PDU')
+    expect(result).toHaveTextContent('Missing position')
+    expect(result.textContent).not.toMatch(/\(pdu_missing\)/)
+    expect(result.textContent).not.toMatch(/\(missing_position\)/)
   })
 
-  it('Fill posts resolve with a note and the header count comes from the returned job', async () => {
+  it('Resolve with note posts resolve, explains that the field is not written, and links the device', async () => {
     const live = installSlice2JobsApi()
     const job = live.seedJob('DCREQ0001234', 'Leaf refresh')
-    live.addFieldItem(job, 'nopos')
+    const item = live.addFieldItem(job, 'nopos')
+    item.device_id = 42
     const user = userEvent.setup()
     renderWithProviders(<App />, '/jobs/DCREQ0001234')
     await screen.findByRole('heading', { name: 'Fill-later queue' })
+    const positions = await screen.findByRole('region', { name: 'Missing position' })
+    expect(within(positions).getByRole('note')).toHaveTextContent("Complete marks this resolved. It doesn't write position (U).")
+    expect(screen.queryByRole('button', { name: 'Fill' })).toBeNull()
     const before = screen.getByTestId('job-queue-summary').textContent ?? ''
     const start = Number(/(\d+) in the fill-later queue/.exec(before)?.[1])
-    const positions = await screen.findByRole('region', { name: 'Missing position' })
-    await user.click(within(positions).getByRole('button', { name: 'Fill' }))
-    await user.type(screen.getByLabelText('Value for position_u'), '42')
+    await user.click(within(positions).getByRole('button', { name: 'Resolve with note' }))
+    const honesty = screen.getByRole('note', { name: 'Resolve with note' })
+    expect(honesty).toHaveTextContent('This marks the item resolved and keeps your note.')
+    expect(honesty).toHaveTextContent("It doesn't change nopos")
+    expect(honesty).toHaveTextContent('set position (U) on the device page')
+    expect(within(honesty).getByRole('link', { name: 'the device page' })).toHaveAttribute('href', '/devices?q=nopos')
+    expect(screen.getByLabelText('Note')).toBeInTheDocument()
+    expect(screen.queryByLabelText(/Value for/)).toBeNull()
+    await user.type(screen.getByLabelText('Note'), '42')
     await user.click(screen.getByRole('button', { name: 'Save and resolve' }))
     await waitFor(() => {
       expect(screen.getByTestId('job-queue-summary')).toHaveTextContent(`${start - 1} in the fill-later queue`)

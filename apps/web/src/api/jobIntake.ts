@@ -356,6 +356,39 @@ export function itemTypeLabel(type: string): string {
   return spaced.charAt(0).toUpperCase() + spaced.slice(1)
 }
 
+const FIELD_LABELS: Record<string, string> = {
+  position_u: 'position (U)',
+  rack_id: 'cabinet',
+  psu_1: 'PSU 1',
+  psu_2: 'PSU 2',
+  host_name: 'hostname',
+  hostname: 'hostname',
+  serial_number: 'serial number',
+  profile_id: 'profile',
+  device_type_id: 'profile',
+  airflow: 'airflow',
+  face: 'face',
+  status: 'status',
+  asset_tag: 'asset tag',
+  managed_by: 'managed by',
+  app_service: 'app service',
+}
+
+export function fieldLabel(field: string): string {
+  if (FIELD_LABELS[field]) return FIELD_LABELS[field]
+  return field.replaceAll('_', ' ')
+}
+
+export function countLabel(n: number, singular: string, plural = `${singular}s`): string {
+  return `${n} ${n === 1 ? singular : plural}`
+}
+
+export function devicePageHref(item: Pick<JobOpenItem, 'device_id' | 'hostname'>): string | null {
+  if (item.device_id == null) return null
+  if (item.hostname) return `/devices?q=${encodeURIComponent(item.hostname)}`
+  return '/devices'
+}
+
 /** @deprecated use itemTypeLabel */
 export function humanizeItemType(type: string): string {
   return itemTypeLabel(type)

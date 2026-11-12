@@ -3,7 +3,11 @@ import { Link, useParams, useSearchParams } from 'react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError } from '../api/client'
 import {
+  JOB_INTAKE_API,
   closeOpenItemsWarning,
+  countLabel,
+  devicePageHref,
+  fieldLabel,
   isJobHasOpenItems,
   isJobOverdue,
   itemTypeLabel,
@@ -25,7 +29,7 @@ const FILTERS: { id: OpenItemListStatus; label: string }[] = [
   { id: 'all', label: 'All' },
 ]
 
-const WRITES_PENDING_NOTE = 'Completing items arrives with the next API update.'
+const WRITES_PENDING_NOTE = 'Complete, Fill, Hold and Dismiss arrive with the next API update.'
 
 function groupByType(items: JobOpenItem[]): [string, JobOpenItem[]][] {
   const order: string[] = []
@@ -147,7 +151,7 @@ export default function JobPage() {
               {overdueFlag && <span className="job-overdue">Open more than 30 days</span>}
             </p>
             <p className="hint" data-testid="job-queue-summary">
-              {job.device_count} devices · {job.connection_count ?? 0} connections · {unresolvedCount} in the fill-later queue
+              {countLabel(job.device_count, 'device')} · {countLabel(job.connection_count ?? 0, 'connection')} · {unresolvedCount} in the fill-later queue
               {job.deferred_count ? ` (${job.deferred_count} deferred)` : ''}.
               {job.days_open != null ? ` Open ${job.days_open} day${job.days_open === 1 ? '' : 's'}.` : ''}
             </p>
@@ -209,16 +213,16 @@ export default function JobPage() {
                         {item.hostname && item.filename ? ' · ' : ''}
                         {item.filename}
                         {!item.hostname && !item.filename ? itemTypeLabel(item.item_type) : null}
-                        {item.target_field ? ` · ${item.target_field}` : ''}
+                        {item.target_field ? ` · ${fieldLabel(item.target_field)}` : ''}
                         {item.cable_label ? ` · ${item.cable_label}` : ''}
                         <span className="job-badge">{item.status}</span>
                       </p>
                       {item.status === 'deferred' && (
                         <p className="hint">Held by {item.deferred_by ?? 'someone'}{item.deferred_at ? ` · ${item.deferred_at}` : ''}</p>
                       )}
-                      {item.note && <p className="hint">{item.note}</p>}
+                      {item.note && <p className="hint job-item-note">{item.note}</p>}
                       {item.filled_value && item.target_field && (
-                        <p className="hint">{item.target_field} set to {item.filled_value}</p>
+                        <p className="hint">{fieldLabel(item.target_field)} set to {item.filled_value}</p>
                       )}
                       {canWrite && (item.status === 'open' || item.status === 'deferred') && (
                         <div className="actions">
@@ -234,7 +238,7 @@ export default function JobPage() {
                             disabled={!canAct}
                             onClick={() => { if (canAct) { setFillFor(item.id); setFillValue(''); setDismissFor(null) } }}
                           >
-                            Fill
+                            {JOB_INTAKE_API.live ? 'Resolve with note' : 'Fill'}
                           </button>
                           {item.status === 'open' && (
                             <button
@@ -263,26 +267,65 @@ export default function JobPage() {
                           </button>
                         </div>
                       )}
+                      {canWrite && (item.status === 'open' || item.status === 'deferred') && item.target_field && (
+                        <p className="hint" role="note">
+                          Complete marks this resolved. It doesn't write {fieldLabel(item.target_field)}.
+                        </p>
+                      )}
                       {canAct && fillFor === item.id && (
-                        <label className="field">
-                          {item.target_field ? `Value for ${item.target_field}` : 'Value'}
-                          <input
-                            value={fillValue}
-                            onChange={(e) => setFillValue(e.target.value)}
-                            aria-label={item.target_field ? `Value for ${item.target_field}` : 'Value'}
-                          />
-                          <div className="actions">
-                            <button type="button" onClick={() => setFillFor(null)}>Cancel</button>
-                            <button
-                              type="button"
-                              className="primary"
-                              disabled={!fillValue.trim()}
-                              onClick={() => void runItem(() => jobIntakeApi().fillItem(item.job_id, item.id, fillValue.trim()))}
-                            >
-                              Save and resolve
-                            </button>
+                        JOB_INTAKE_API.live ? (
+                          <div className="field">
+                            <p className="hint" role="note" aria-label="Resolve with note">
+                              This marks the item resolved and keeps your note.
+                              {item.target_field ? (
+                                <>
+                                  {' '}It doesn't change {item.hostname ? <span className="mono">{item.hostname}</span> : 'this device'}; set {fieldLabel(item.target_field)} on{' '}
+                                  {devicePageHref(item) ? <Link to={devicePageHref(item)!}>the device page</Link> : 'the device page'}.
+                                </>
+                              ) : null}
+                            </p>
+                            <label className="field">
+                              Note
+                              <textarea
+                                value={fillValue}
+                                onChange={(e) => setFillValue(e.target.value)}
+                                aria-label="Note"
+                                rows={3}
+                              />
+                            </label>
+                            <div className="actions">
+                              <button type="button" onClick={() => setFillFor(null)}>Cancel</button>
+                              <button
+                                type="button"
+                                className="primary"
+                                disabled={!fillValue.trim()}
+                                onClick={() => void runItem(() => jobIntakeApi().fillItem(item.job_id, item.id, fillValue.trim()))}
+                              >
+                                Save and resolve
+                              </button>
+                            </div>
                           </div>
-                        </label>
+                        ) : (
+                          <label className="field">
+                            {item.target_field ? `Value for ${item.target_field}` : 'Value'}
+                            <input
+                              value={fillValue}
+                              onChange={(e) => setFillValue(e.target.value)}
+                              aria-label={item.target_field ? `Value for ${item.target_field}` : 'Value'}
+                            />
+                            <div className="actions">
+                              <button type="button" onClick={() => setFillFor(null)}>Cancel</button>
+                              <button
+                                type="button"
+                                className="primary"
+                                disabled={!fillValue.trim()}
+                                onClick={() => void runItem(() => jobIntakeApi().fillItem(item.job_id, item.id, fillValue.trim()))}
+                              >
+                                Save and resolve
+                              </button>
+                            </div>
+                          </label>
+                        )
                       )}
                       {canAct && dismissFor === item.id && (
                         <label className="field">

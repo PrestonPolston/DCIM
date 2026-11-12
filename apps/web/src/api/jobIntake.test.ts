@@ -12,6 +12,9 @@ import {
   isJobOverdue,
   isValidDcreq,
   closeOpenItemsWarning,
+  countLabel,
+  devicePageHref,
+  fieldLabel,
   itemTypeLabel,
   jobHref,
   jobIntakeApi,
@@ -246,6 +249,24 @@ describe('item labels and close warning copy', () => {
     expect(itemTypeLabel('epif_not_uploaded')).toBe('ePIF not uploaded')
     expect(itemTypeLabel('cable_matrix_not_uploaded')).toBe('Cable matrix not uploaded')
     expect(itemTypeLabel('missing_position')).toBe('Missing position')
+    expect(itemTypeLabel('pdu_missing')).toBe('Missing PDU')
+  })
+
+  it('uses readable field labels and pluralizes counts', () => {
+    expect(fieldLabel('position_u')).toBe('position (U)')
+    expect(fieldLabel('psu_1')).toBe('PSU 1')
+    expect(fieldLabel('psu_2')).toBe('PSU 2')
+    expect(fieldLabel('unknown_col')).toBe('unknown col')
+    expect(countLabel(0, 'device')).toBe('0 devices')
+    expect(countLabel(1, 'device')).toBe('1 device')
+    expect(countLabel(2, 'device')).toBe('2 devices')
+    expect(countLabel(1, 'connection')).toBe('1 connection')
+  })
+
+  it('links to the devices page when an item has a device', () => {
+    expect(devicePageHref({ device_id: 7, hostname: 'web11' })).toBe('/devices?q=web11')
+    expect(devicePageHref({ device_id: 7, hostname: null })).toBe('/devices')
+    expect(devicePageHref({ device_id: null, hostname: 'web11' })).toBeNull()
   })
 
   it('uses the friendly errors.ts text for closeOpenItemsWarning, not the API field name', () => {
