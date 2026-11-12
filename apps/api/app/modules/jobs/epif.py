@@ -79,9 +79,12 @@ def forbidden_header(h: str) -> bool:
     return is_secret_name(h) or bool(_BMC.search(flat) or _BMC.search(normalise_name(h)))
 
 
-def parse_csv(text: str, max_rows: int) -> list[tuple[int, dict]]:
+def parse_csv(text: str, max_rows: int, aliases: dict | None = None,
+              required: tuple[tuple[str, str], ...] = (("name", "Name"),), what: str = "The ePIF file") \
+        -> list[tuple[int, dict]]:
     """Header checks first (nothing is read or stored on a bad header), then rows. Returns [(row_number, cells)]
-    with canonical keys; row_number is the 1-based data row."""
+    with canonical keys; row_number is the 1-based data row. `required` = (canonical, label) columns."""
+    aliases = ALIASES if aliases is None else aliases
     try:
         reader = csv.reader(io.StringIO(text))
         header = next(reader, None)
@@ -96,7 +99,7 @@ def parse_csv(text: str, max_rows: int) -> list[tuple[int, dict]]:
                   "those columns and upload again. Secrets are never stored.", headers=bad)
     canon, unknown = [], []
     for h in headers:
-        c = ALIASES.get(normalise_name(h)) if h else None
+        c = aliases.get(normalise_name(h)) if h else None
         if h and c is None:
             unknown.append(h)
         canon.append(c)
@@ -106,8 +109,9 @@ def parse_csv(text: str, max_rows: int) -> list[tuple[int, dict]]:
     if dupes:
         raise err(422, "duplicate_columns", f"These columns appear more than once: {', '.join(dupes)}",
                   columns=dupes)
-    if "name" not in canon:
-        raise err(422, "missing_columns", "The ePIF file needs at least a Name column", columns=["Name"])
+    missing = [label for c, label in required if c not in canon]
+    if missing:
+        raise err(422, "missing_columns", f"{what} needs these columns: {', '.join(missing)}", columns=missing)
     rows = []
     try:
         for values in reader:
@@ -142,10 +146,12 @@ class RowEval:
     messages: list = field(default_factory=list)
     plan: dict = field(default_factory=dict)
 
-    def add(self, level, code, message, field_=None, item_type=None, target_field=None):
+    def add(self, level, code, message, field_=None, item_type=None, target_field=None, target=None):
         m = {"code": code, "field": field_, "message": message, "level": level}
         if item_type:
             m["item_type"], m["target_field"] = item_type, target_field
+            if target:
+                m["target"] = target  # which committed record the item points at (cable_matrix: cable)
         self.messages.append(m)
 
     @property
@@ -396,16 +402,30 @@ def counts(rows: list[ImportRowRow]) -> dict:
 
 
 def public_messages(raw: str | None) -> list[dict]:
-    return [{k: m.get(k) for k in ("code", "field", "message", "level", "item_type", "target_field")}
+    return [{k: m.get(k) for k in ("code", "field", "message", "level", "item_type", "target_field", "target")}
             for m in json.loads(raw or "[]")]
 
 
-def row_out(r: ImportRowRow) -> dict:
+def _end_text(cells: dict, side: str) -> str | None:
+    host, port, slot = cells.get(f"{side}_name"), cells.get(f"{side}_port"), cells.get(f"{side}_slot")
+    if not host and not port:
+        return None
+    return f"{host or '?'}:{slot + '/' if slot else ''}{port or '?'}"
+
+
+def row_out(r: ImportRowRow, kind: str = "epif") -> dict:
     cells = json.loads(r.raw_json)
-    return {"id": r.id, "row_number": r.row_number, "result": r.result, "messages": public_messages(r.messages_json),
-            "epif_id": cells.get("epif_id"), "action": cells.get("action"), "hostname": cells.get("name"),
-            "row": cells.get("row"), "rack": cells.get("rack"), "ru": cells.get("ru"), "cells": cells,
-            "device_id": r.device_id, "epif_request_id": r.epif_request_id}
+    base = {"id": r.id, "row_number": r.row_number, "result": r.result, "messages": public_messages(r.messages_json),
+            "cells": cells, "device_id": r.device_id, "epif_request_id": r.epif_request_id,
+            "connection_id": r.connection_id, "cable_id": r.cable_id}
+    if kind == "cable_matrix":
+        return {**base, "epif_id": None, "matrix_id": cells.get("matrix_id"), "action": cells.get("action"),
+                "hostname": cells.get("a_name"), "row": cells.get("a_row"), "rack": cells.get("a_rack"),
+                "ru": cells.get("a_ru"), "a": _end_text(cells, "a"), "z": _end_text(cells, "z"),
+                "trail": cells.get("trail"), "cable_label": cells.get("cable_label")}
+    return {**base, "epif_id": cells.get("epif_id"), "matrix_id": None, "action": cells.get("action"),
+            "hostname": cells.get("name"), "row": cells.get("row"), "rack": cells.get("rack"), "ru": cells.get("ru"),
+            "a": None, "z": None, "trail": None, "cable_label": None}
 
 
 def import_out(session: Session, imp: JobImportRow, with_rows: bool = True, reupload: str | None = None) -> dict:
@@ -416,7 +436,7 @@ def import_out(session: Session, imp: JobImportRow, with_rows: bool = True, reup
            "uploaded_by": imp.uploaded_by, "change_set_id": imp.change_set_id, "counts": counts(rows),
            "reupload": reupload}
     if with_rows:
-        out["rows"] = [row_out(r) for r in rows]
+        out["rows"] = [row_out(r, imp.kind) for r in rows]
     return out
 
 
@@ -434,14 +454,20 @@ def _write_rows(session: Session, imp: JobImportRow, evals: list[RowEval]) -> No
 def stage(session: Session, job: ProjectRow, dcreq: str, ref_id: int, kind: str, text: str, filename: str | None,
           max_rows: int) -> tuple[JobImportRow, str | None]:
     """Returns (batch, reupload) where reupload is None (new batch), 'review' or 'committed'."""
-    rows = parse_csv(text, max_rows)  # 422s happen here, before anything is stored
+    if kind == "cable_matrix":
+        from app.modules.jobs import cable_matrix as kind_mod
+    else:
+        kind_mod = None
+    parse = kind_mod.parse if kind_mod else parse_csv
+    run = kind_mod.evaluate_all if kind_mod else evaluate_all
+    rows = parse(text, max_rows)  # 422s happen here, before anything is stored
     sha = hashlib.sha256(text.encode("utf-8")).hexdigest()
     same = session.exec(select(JobImportRow).where(JobImportRow.project_id == job.id, JobImportRow.kind == kind,
                                                    JobImportRow.sha256 == sha)
                         .order_by(JobImportRow.id.desc())).first()
     if same is not None and same.status == "committed":
         return same, "committed"  # idempotent: nothing new is staged
-    evals = evaluate_all(session, job, dcreq, rows)
+    evals = run(session, job, dcreq, rows)
     cs = new_change_set(session, "csv_import", note=f"job {job.id} {kind} stage")
     if same is not None:  # same file again, not committed: re-validate the same batch (latest DB state)
         for r in session.exec(select(ImportRowRow).where(ImportRowRow.job_import_id == same.id)).all():
@@ -503,10 +529,13 @@ def upsert_item(session: Session, job_id: int, item_type: str, source: str, chan
     return item, True
 
 
-def _items_for(session, job_id, ev_messages, cs_id, target, row_id, who, created):
+def _items_for(session, job_id, ev_messages, cs_id, target, row_id, who, created, source="epif", targets=None):
+    """One item per message that names an item_type. `targets` maps a message's 'target' key (e.g. 'cable')
+    to a different target dict than the default."""
     for m in ev_messages:
         if m.get("item_type"):
-            item, new = upsert_item(session, job_id, m["item_type"], "epif", cs_id, target=target,
+            tgt = (targets or {}).get(m.get("target"), target)
+            item, new = upsert_item(session, job_id, m["item_type"], source, cs_id, target=tgt,
                                     target_field=m.get("target_field"), note=m["message"], import_row_id=row_id,
                                     who=who)
             if new:
@@ -555,62 +584,89 @@ def _create_device(session: Session, job: ProjectRow, p: dict, cs) -> tuple[Devi
                       "units taken at the same time)", "name", "other", "host_name")
 
 
+@dataclass
+class CommitAcc:
+    committed: list = field(default_factory=list)
+    held: list = field(default_factory=list)
+    skipped: list = field(default_factory=list)
+    warnings: list = field(default_factory=list)
+    created: list = field(default_factory=list)
+
+    def count(self, which: str, import_id: int) -> int:
+        return sum(1 for x in getattr(self, which) if x["import_id"] == import_id)
+
+    def warn(self, ev: "RowEval", imp: JobImportRow, hostname: str | None) -> None:
+        for m in ev.messages:
+            if m["level"] == "warning":
+                self.warnings.append({"code": m["code"], "message": m["message"], "field": m["field"],
+                                      "item_type": m.get("item_type"), "target_field": m.get("target_field"),
+                                      "import_id": imp.id, "row_number": ev.row_number, "hostname": hostname})
+
+
+def reasons(ev: "RowEval", level: str) -> list[dict]:
+    return [m for m in public_messages(json.dumps(ev.messages)) if m["level"] == level]
+
+
+def _commit_epif(session: Session, job: ProjectRow, dcreq: str, ref_id: int, imp: JobImportRow, rows: list,
+                 cs, who: str | None, acc: CommitAcc) -> None:
+    # re-validate against the DB as it is now (it may have changed since the preview)
+    evals = evaluate_all(session, job, dcreq, [(r.row_number, json.loads(r.raw_json)) for r in rows])
+    for r, ev in zip(rows, evals):
+        p, res = ev.plan, ev.result
+        if res in ("ready", "warning"):
+            dev, problem = _create_device(session, job, p, cs)
+            if problem:
+                ev.add(*problem)
+                res = "conflict"
+        base = {"import_id": imp.id, "kind": imp.kind, "row_number": r.row_number, "epif_id": p.get("external_id"),
+                "hostname": p.get("host")}
+        if res == "conflict":
+            r.result = "skipped"
+            acc.skipped.append({**base, "reasons": reasons(ev, "conflict")})
+            _items_for(session, job.id, [m for m in ev.messages if m["level"] == "conflict"], cs.id, {}, r.id,
+                       who, acc.created)
+        elif res == "held":
+            req = _request(session, job, imp, dcreq, ref_id, p)
+            r.result, r.epif_request_id = "held", req.id
+            acc.held.append({**base, "epif_request_id": req.id, "reasons": reasons(ev, "held")})
+            _items_for(session, job.id, ev.messages, cs.id, {"epif_request_id": req.id}, r.id, who, acc.created)
+        else:
+            req = _request(session, job, imp, dcreq, ref_id, p, device_id=dev.id)
+            r.result, r.epif_request_id, r.device_id = "committed", req.id, dev.id
+            acc.committed.append({**base, "device_id": dev.id, "epif_request_id": req.id})
+            _items_for(session, job.id, ev.messages, cs.id, {"device_id": dev.id}, r.id, who, acc.created)
+        if res != "conflict":
+            acc.warn(ev, imp, p.get("host"))
+        r.messages_json = json.dumps(ev.messages)
+        session.add(r)
+
+
 def commit_batches(session: Session, job: ProjectRow, dcreq: str, ref_id: int, imports: list[JobImportRow]) -> dict:
     """All-or-nothing for the writable rows of every batch given, in ONE change set. Held rows keep their request
-    and items; conflict rows are skipped with reasons; the batch still commits (200, never 4xx for data)."""
+    / staging row and items; conflict rows are skipped with reasons; the batch still commits (200, never 4xx for
+    data). Batches commit oldest first, so an ePIF batch creates devices before a cable batch connects them."""
     who = actor(session)
     cs = new_change_set(session, "csv_import", note=f"job {job.id} commit imports {[i.id for i in imports]}")
-    committed, held, skipped, warnings, created = [], [], [], [], []
-    for imp in imports:
+    acc = CommitAcc()
+    for imp in sorted(imports, key=lambda i: (i.kind != "epif", i.id)):
         session.info["import_batch_id"] = f"job_import:{imp.id}"
         rows = session.exec(select(ImportRowRow).where(ImportRowRow.job_import_id == imp.id)
                             .order_by(ImportRowRow.row_number)).all()
-        # re-validate against the DB as it is now (it may have changed since the preview)
-        evals = evaluate_all(session, job, dcreq, [(r.row_number, json.loads(r.raw_json)) for r in rows])
-        for r, ev in zip(rows, evals):
-            p, res = ev.plan, ev.result
-            if res in ("ready", "warning"):
-                dev, problem = _create_device(session, job, p, cs)
-                if problem:
-                    ev.add(*problem)
-                    res = "conflict"
-            base = {"import_id": imp.id, "kind": imp.kind, "row_number": r.row_number, "epif_id": p.get("external_id"),
-                    "hostname": p.get("host")}
-            if res == "conflict":
-                r.result = "skipped"
-                reasons = [m for m in public_messages(json.dumps(ev.messages)) if m["level"] == "conflict"]
-                skipped.append({**base, "reasons": reasons})
-                _items_for(session, job.id, [m for m in ev.messages if m["level"] == "conflict"], cs.id, {}, r.id,
-                           who, created)
-            elif res == "held":
-                req = _request(session, job, imp, dcreq, ref_id, p)
-                r.result, r.epif_request_id = "held", req.id
-                held.append({**base, "epif_request_id": req.id,
-                             "reasons": [m for m in public_messages(json.dumps(ev.messages)) if m["level"] == "held"]})
-                _items_for(session, job.id, ev.messages, cs.id, {"epif_request_id": req.id}, r.id, who, created)
-            else:
-                req = _request(session, job, imp, dcreq, ref_id, p, device_id=dev.id)
-                r.result, r.epif_request_id, r.device_id = "committed", req.id, dev.id
-                committed.append({**base, "device_id": dev.id, "epif_request_id": req.id})
-                _items_for(session, job.id, ev.messages, cs.id, {"device_id": dev.id}, r.id, who, created)
-            for m in ev.messages:
-                if m["level"] == "warning" and res != "conflict":
-                    warnings.append({"code": m["code"], "message": m["message"], "field": m["field"],
-                                     "item_type": m.get("item_type"), "target_field": m.get("target_field"),
-                                     "import_id": imp.id, "row_number": r.row_number, "hostname": p.get("host")})
-            r.messages_json = json.dumps(ev.messages)
-            session.add(r)
+        if imp.kind == "cable_matrix":
+            from app.modules.jobs import cable_matrix
+            cable_matrix.commit_rows(session, job, dcreq, imp, rows, cs, who, acc)
+        else:
+            _commit_epif(session, job, dcreq, ref_id, imp, rows, cs, who, acc)
         imp.status, imp.change_set_id = "committed", cs.id
         session.add(imp)
         record_audit(session, None, "job_import.commit", "job_import", imp.id, after={
-            "job_id": job.id, "committed": sum(1 for c in committed if c["import_id"] == imp.id),
-            "held": sum(1 for h in held if h["import_id"] == imp.id),
-            "skipped": sum(1 for s in skipped if s["import_id"] == imp.id), "change_set_id": cs.id})
+            "job_id": job.id, "kind": imp.kind, "committed": acc.count("committed", imp.id),
+            "held": acc.count("held", imp.id), "skipped": acc.count("skipped", imp.id), "change_set_id": cs.id})
     session.info.pop("import_batch_id", None)
     resolved = resolve_not_uploaded(session, job.id, {i.kind for i in imports}, cs.id, who)
     session.commit()
-    return {"committed": committed, "held": held, "skipped": skipped, "warnings": warnings,
-            "open_items_created": [i.id for i in created], "resolved_item_ids": resolved}
+    return {"committed": acc.committed, "held": acc.held, "skipped": acc.skipped, "warnings": acc.warnings,
+            "open_items_created": [i.id for i in acc.created], "resolved_item_ids": resolved}
 
 
 NOT_UPLOADED = {"epif": "epif_not_uploaded", "cable_matrix": "cable_matrix_not_uploaded"}

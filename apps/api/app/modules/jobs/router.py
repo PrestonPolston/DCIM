@@ -8,7 +8,7 @@ from sqlmodel import Session, func, or_, select
 
 from app.db import get_session
 from app.modules.auth.deps import TECH, get_current_user
-from app.modules.connections.models import CableRow
+from app.modules.connections.models import CableRow, ConnectionRow
 from app.modules.devices.models import DeviceRow
 from app.modules.directory.models import ProjectReferenceRow as Ref, ProjectRow
 from app.settings import Settings, get_settings
@@ -117,20 +117,22 @@ def list_open_items(job_key: str, response: Response, status: ItemFilter = "unre
 
 def _items_stmt():
     host = func.coalesce(DeviceRow.host_name, EpifRequestRow.requested_host_name)
-    return (select(Item, host, CableRow.label, JobImportRow.filename)
+    return (select(Item, host, CableRow.label, JobImportRow.filename, CableRow.trail)
             .join(DeviceRow, DeviceRow.id == Item.device_id, isouter=True)
             .join(EpifRequestRow, EpifRequestRow.id == Item.epif_request_id, isouter=True)
-            .join(CableRow, CableRow.id == Item.cable_id, isouter=True)
+            .join(ConnectionRow, ConnectionRow.id == Item.connection_id, isouter=True)
+            .join(CableRow, CableRow.id == func.coalesce(Item.cable_id, ConnectionRow.cable_id), isouter=True)
             .join(ImportRowRow, ImportRowRow.id == Item.import_row_id, isouter=True)
             .join(JobImportRow, JobImportRow.id == ImportRowRow.job_import_id, isouter=True))
 
 
-def _item_out(p, dcreq, i, host, label, filename) -> dict:
+def _item_out(p, dcreq, i, host, label, filename, trail) -> dict:
     return {
         "id": i.id, "job_id": p.id, "dcreq": dcreq, "item_type": i.item_type, "status": i.status,
         "target_field": i.target_field, "note": i.note, "source": i.source, "epif_request_id": i.epif_request_id,
         "device_id": i.device_id, "connection_id": i.connection_id, "cable_id": i.cable_id,
         "import_row_id": i.import_row_id, "filename": filename, "hostname": host, "cable_label": label,
+        "cable_trail": trail,
         "created_at": iso_z(i.created_at), "created_by": i.created_by, "deferred_at": iso_z(i.deferred_at),
         "deferred_by": i.deferred_by, "resolved_at": iso_z(i.resolved_at), "resolved_by": i.resolved_by,
     }
@@ -172,12 +174,11 @@ def upload_import(job_key: str, response: Response, kind: ImportKind = Query("ep
                   filename: str | None = Query(None, max_length=255),
                   text: str = Depends(read_csv_body), settings: Settings = Depends(get_settings),
                   session: Session = Depends(get_session)):
-    """Stage a CSV on an EXISTING job (a CSV never creates a job) and return the validated preview.
+    """Stage a CSV (kind=epif or cable_matrix) on an EXISTING job (a CSV never creates a job) and return the
+    validated preview.
     Body: the raw file with Content-Type: text/csv. Nothing live is written until commit."""
     p, dcreq = svc.get_job(session, job_key)
     _open_job(p)
-    if kind != "epif":
-        raise svc.err(422, "import_kind_not_available", "Cable matrix import isn't available yet")
     imp, reupload = epif.stage(session, p, dcreq, p.primary_dcreq_id, kind, text, filename, settings.csv_max_rows)
     if reupload:
         response.status_code = 200

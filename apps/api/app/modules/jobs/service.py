@@ -97,7 +97,8 @@ def device_counts(session: Session, ids: list[int]) -> dict[int, int]:
 def job_out(session: Session, jobs: list[tuple[ProjectRow, str]], detail: bool = False) -> list[dict]:
     now = datetime.now(UTC)
     ids = [p.id for p, _ in jobs]
-    items, devices = item_counts(session, ids), device_counts(session, ids)
+    from app.modules.jobs.cable_matrix import connection_counts
+    items, devices, conns = item_counts(session, ids), device_counts(session, ids), connection_counts(session, ids)
     res = []
     for p, dcreq in jobs:
         counts = dict(items.get(p.id, {}))
@@ -109,7 +110,7 @@ def job_out(session: Session, jobs: list[tuple[ProjectRow, str]], detail: bool =
             "created_at": iso_z(p.created_at), "updated_at": iso_z(p.updated_at), "created_by": p.created_by,
             **computed(p, now),
             "unresolved_count": sum(counts.values()), "deferred_count": deferred,
-            "device_count": devices.get(p.id, 0),
+            "device_count": devices.get(p.id, 0), "connection_count": conns.get(p.id, 0),
         }
         if detail:
             d["unresolved_by_type"] = dict(sorted(counts.items()))

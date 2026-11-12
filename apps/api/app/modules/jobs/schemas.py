@@ -48,6 +48,8 @@ class Job(BaseModel):
     unresolved_count: int = Field(description="Open + deferred items")
     deferred_count: int
     device_count: int = Field(description="Live devices with project_id = this job")
+    connection_count: int = Field(description="Non-removed connections whose cable belongs to this job "
+                                              "(cables.project_id; cable-matrix import)")
 
 
 class JobDetail(Job):
@@ -86,7 +88,8 @@ class OpenItem(BaseModel):
     filename: str | None = Field(description="Joined from the import batch (not stored)")
     hostname: str | None = Field(description="Joined from the device, else the ePIF request's requested name "
                                                         "(not stored)")
-    cable_label: str | None = Field(description="Joined from the cable (not stored)")
+    cable_label: str | None = Field(description="Joined from the cable, or the connection's cable (not stored)")
+    cable_trail: str | None = Field(description="Joined like cable_label (not stored)")
     created_at: str
     created_by: str | None
     deferred_at: str | None
@@ -108,6 +111,8 @@ class RowMessage(BaseModel):
         description="conflict = row skipped; held = request kept, no device; warning = written + fill-later item")
     item_type: str | None = Field(None, description="Open item this message becomes on commit (if any)")
     target_field: str | None = None
+    target: str | None = Field(None, description="Cable matrix: 'cable' when the item points at the cable "
+                                                 "instead of the connection")
 
 
 class ImportRow(BaseModel):
@@ -115,15 +120,22 @@ class ImportRow(BaseModel):
     row_number: int = Field(description="1-based data row (header excluded)")
     result: RowResult
     messages: list[RowMessage]
-    epif_id: str | None
+    epif_id: str | None = Field(description="ePIF rows: the ePIF ID")
+    matrix_id: str | None = Field(description="Cable-matrix rows: the ID column (-> cables.external_id)")
     action: str | None
-    hostname: str | None
+    hostname: str | None = Field(description="ePIF: Name; cable matrix: A Name")
     row: str | None
     rack: str | None
     ru: str | None
+    a: str | None = Field(description="Cable matrix: 'host:slot/port' as written for the A end")
+    z: str | None = Field(description="Cable matrix: the Z end")
+    trail: str | None
+    cable_label: str | None
     cells: dict[str, str] = Field(description="The staged row by canonical column (secrets are never staged)")
     device_id: int | None
     epif_request_id: int | None
+    connection_id: int | None
+    cable_id: int | None
 
 
 class ImportCounts(BaseModel):
@@ -162,9 +174,15 @@ class CommitRow(BaseModel):
     kind: ImportKind
     row_number: int
     epif_id: str | None
+    matrix_id: str | None = None
     hostname: str | None
+    a: str | None = None
+    z: str | None = None
     device_id: int | None = None
     epif_request_id: int | None = None
+    connection_id: int | None = None
+    cable_id: int | None = None
+    cable_label: str | None = None
     reasons: list[RowMessage] = []
 
 
