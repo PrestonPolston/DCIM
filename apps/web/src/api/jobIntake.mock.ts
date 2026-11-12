@@ -1,5 +1,6 @@
 // In-memory job-intake mock that mirrors the proposed /jobs contract.
 import { ApiError } from './client'
+import { jobTextViolation } from './errors'
 import {
   DCREQ_PATTERN,
   JOB_INTAKE_MAX_FILE_BYTES,
@@ -394,6 +395,7 @@ export function seedMockJob(init: Partial<Job> & { dcreq: string }): Job {
     id,
     name: init.name ?? dcreq,
     dcreq,
+    description: init.description ?? null,
     primary_dcreq_id: init.primary_dcreq_id ?? store.nextRef++,
     status: init.status ?? 'open',
     opened_at: nowIso,
@@ -590,7 +592,15 @@ function finalizeCommit(job: Job, batches: JobImport[]): IntakeCommitResult {
 export function createMockJobIntakeApi(): JobIntakeApi {
   store = empty()
   return {
-    async createJob(raw) {
+    async createJob(raw, fields) {
+      for (const [field, value] of [
+        ['dcreq', raw],
+        ['name', fields?.name],
+        ['description', fields?.description],
+      ] as const) {
+        const violation = jobTextViolation(field, value, 'single_line')
+        if (violation) throwApi(422, violation.code, violation.message, { field: violation.field })
+      }
       const dcreq = normalizeDcreq(raw)
       if (!isValidDcreq(dcreq) || !DCREQ_PATTERN.test(dcreq)) {
         throwApi(422, 'dcreq_format', 'Enter a DCREQ like DCREQ0001234 (DCREQ000 + 4 digits).')
@@ -605,7 +615,7 @@ export function createMockJobIntakeApi(): JobIntakeApi {
           { existing: existingRef(job) },
         )
       }
-      const created = seedMockJob({ dcreq })
+      const created = seedMockJob({ dcreq, name: fields?.name?.trim() || dcreq, description: fields?.description?.trim() || null })
       for (const kind of ['epif', 'cable_matrix'] as const) {
         addItem({
           job_id: created.id, dcreq: created.dcreq, item_type: skipType(kind), status: 'open',
@@ -638,6 +648,9 @@ export function createMockJobIntakeApi(): JobIntakeApi {
     async closeJob(id, opts = {}) {
       const job = findJob(id)
       if (job.status === 'closed') throwApi(409, 'job_already_closed', 'This job is already closed', { closed_at: job.closed_at })
+      const noteViolation = jobTextViolation('note', opts.note, 'note')
+      if (noteViolation) throwApi(422, noteViolation.code, noteViolation.message, { field: 'note' })
+
       const unresolved = flags(job).unresolved_count
       if (unresolved && !opts.acknowledge_open_items) {
         throwApi(
@@ -657,8 +670,10 @@ export function createMockJobIntakeApi(): JobIntakeApi {
         : null
       return { job: closed, warning }
     },
-    async reopenJob(id) {
+    async reopenJob(id, note = null) {
       const job = findJob(id)
+      const reopenNoteViolation = jobTextViolation('note', note, 'note')
+      if (reopenNoteViolation) throwApi(422, reopenNoteViolation.code, reopenNoteViolation.message, { field: 'note' })
       if (job.status === 'open') throwApi(409, 'job_already_open', 'This job is already open')
       job.status = 'open'
       job.closed_at = null
@@ -822,6 +837,9 @@ export function createMockJobIntakeApi(): JobIntakeApi {
     },
     async deferItem(jobId, itemId, note = null) {
       const item = getItem(jobId, itemId)
+      const noteViolation = jobTextViolation('note', note, 'note')
+      if (noteViolation) throwApi(422, noteViolation.code, noteViolation.message, { field: 'note' })
+
       item.status = 'deferred'
       item.deferred_at = iso()
       item.deferred_by = ACTOR
@@ -837,6 +855,8 @@ export function createMockJobIntakeApi(): JobIntakeApi {
     },
     async dismissItem(jobId, itemId, note) {
       if (!note || !note.trim()) throwApi(422, 'note_required', 'A note is required to dismiss an item.')
+      const noteViolation = jobTextViolation('note', note, 'note')
+      if (noteViolation) throwApi(422, noteViolation.code, noteViolation.message, { field: 'note' })
       const item = getItem(jobId, itemId)
       item.status = 'dismissed'
       item.note = `Dismissed: ${note}`
@@ -846,10 +866,12 @@ export function createMockJobIntakeApi(): JobIntakeApi {
     },
     async resolveItem(jobId, itemId, note = null) {
       const item = getItem(jobId, itemId)
+      const noteViolation = jobTextViolation('note', note, 'note')
+      if (noteViolation) throwApi(422, noteViolation.code, noteViolation.message, { field: 'note' })
       item.status = 'resolved'
       item.resolved_at = iso()
       item.resolved_by = ACTOR
-      if (note && note.trim()) item.note = `Resolved: ${note.trim()}`
+      if (note && note.trim()) item.note = `Resolved: ${note.replace(/\r\n/g, '\n').trim()}`
       return { item, job: flags(findJob(jobId)) }
     },
     async fillItem(jobId, itemId, value) {

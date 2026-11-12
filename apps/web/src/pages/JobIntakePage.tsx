@@ -23,7 +23,7 @@ import {
   type SkippedConflictRow,
   type RowMessage,
 } from '../api/jobIntake'
-import type { ExistingJobRef } from '../api/errors'
+import { errorDetail, startsWithFormulaPrefix, textFieldError, type ExistingJobRef } from '../api/errors'
 import { useCan } from '../auth/auth'
 import { errMessage } from '../api/home'
 
@@ -179,6 +179,9 @@ export default function JobIntakePage() {
   const [duplicate, setDuplicate] = useState<ExistingJobRef | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
+  const [fieldError, setFieldError] = useState<{ dcreq?: string; name?: string; description?: string }>({})
   const [fileError, setFileError] = useState<{ epif: string | null; cable_matrix: string | null }>({ epif: null, cable_matrix: null })
   const [epif, setEpif] = useState<JobImport | null>(null)
   const [cable, setCable] = useState<JobImport | null>(null)
@@ -197,20 +200,34 @@ export default function JobIntakePage() {
     setRaw(value)
     setDuplicate(null)
     setError(null)
+    setFieldError((e) => ({ ...e, dcreq: undefined }))
   }
 
   async function createJob() {
-    if (!valid) return
+    if (!valid && !startsWithFormulaPrefix(raw)) return
     setBusy(true)
     setError(null)
+    setFieldError({})
     setDuplicate(null)
     try {
-      const created = await jobIntakeApi().createJob(raw)
+      const created = await jobIntakeApi().createJob(raw, {
+        name: name || undefined,
+        description: description || undefined,
+      })
       setJob(created)
       setStep(1)
     } catch (e) {
       if (isDuplicateDcreq(e)) setDuplicate(duplicateExisting(e))
-      else setError(errText(e))
+      else {
+        const field = errorDetail((e as { detail?: unknown }).detail)?.field
+          ?? (e as { field?: string }).field
+        const inline = textFieldError(e, field ?? undefined)
+        if (inline && (field === 'dcreq' || field === 'name' || field === 'description')) {
+          setFieldError({ [field]: inline })
+        } else if (inline && !field) {
+          setFieldError({ dcreq: inline })
+        } else setError(errText(e))
+      }
     } finally {
       setBusy(false)
     }
@@ -326,6 +343,9 @@ export default function JobIntakePage() {
     setDuplicate(null)
     setBusy(false)
     setError(null)
+    setName('')
+    setDescription('')
+    setFieldError({})
     setFileError({ epif: null, cable_matrix: null })
     setEpif(null)
     setCable(null)
@@ -359,18 +379,52 @@ export default function JobIntakePage() {
               spellCheck={false}
               placeholder="DCREQ0001234"
               aria-describedby="dcreq-hint"
-              aria-invalid={showFormatHint || !!duplicate || undefined}
+              aria-invalid={showFormatHint || !!duplicate || !!fieldError.dcreq || undefined}
               value={raw}
               disabled={!canWrite || busy}
               onChange={(e) => resetFromDcreqChange(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && valid && !duplicate && canWrite && !busy) void createJob() }}
+              onKeyDown={(e) => { if (e.key === 'Enter' && (valid || startsWithFormulaPrefix(raw)) && !duplicate && canWrite && !busy) void createJob() }}
             />
           </label>
           <p id="dcreq-hint" className="hint">
             {DCREQ_HINT(canonical, valid, showFormatHint)}
           </p>
-          {showFormatHint && (
+          {fieldError.dcreq && (
+            <p className="field-error" role="alert">{fieldError.dcreq}</p>
+          )}
+          {showFormatHint && !fieldError.dcreq && !startsWithFormulaPrefix(raw) && (
             <p className="field-error" role="alert">Enter a DCREQ like DCREQ0001234 (DCREQ000 + 4 digits).</p>
+          )}
+          <label className="field">
+            Name
+            <input
+              type="text"
+              autoComplete="off"
+              placeholder="Defaults to the DCREQ"
+              aria-label="Name"
+              aria-invalid={fieldError.name ? true : undefined}
+              value={name}
+              disabled={!canWrite || busy}
+              onChange={(e) => { setName(e.target.value); setFieldError((err) => ({ ...err, name: undefined })) }}
+            />
+          </label>
+          {fieldError.name && (
+            <p className="field-error" role="alert">{fieldError.name}</p>
+          )}
+          <label className="field">
+            Description
+            <textarea
+              rows={2}
+              autoComplete="off"
+              aria-label="Description"
+              aria-invalid={fieldError.description ? true : undefined}
+              value={description}
+              disabled={!canWrite || busy}
+              onChange={(e) => { setDescription(e.target.value); setFieldError((err) => ({ ...err, description: undefined })) }}
+            />
+          </label>
+          {fieldError.description && (
+            <p className="field-error" role="alert">{fieldError.description}</p>
           )}
           {duplicate && (
             <div className="banner job-intake-duplicate" role="alert">
@@ -384,7 +438,7 @@ export default function JobIntakePage() {
           {error && <p className="error" role="alert">{error}</p>}
           <div className="actions">
             <button type="button" onClick={() => navigate('/')}>Cancel</button>
-            <button type="button" className="primary" disabled={!canWrite || !valid || !!duplicate || busy} onClick={() => void createJob()}>
+            <button type="button" className="primary" disabled={!canWrite || !(valid || startsWithFormulaPrefix(raw)) || !!duplicate || busy} onClick={() => void createJob()}>
               Next: ePIF
             </button>
           </div>

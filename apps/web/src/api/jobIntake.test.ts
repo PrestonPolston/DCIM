@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { ApiError } from './client'
-import { friendlyMessage, errorDetail, stripPydanticText, formatValidationErrors, noteFieldError } from './errors'
+import { friendlyMessage, errorDetail, stripPydanticText, formatValidationErrors, noteFieldError, textFieldError, jobTextViolation, textRejectionCopy } from './errors'
 import {
   DCREQ_PATTERN,
   JOB_INTAKE_API,
@@ -369,6 +369,19 @@ describe('note validation copy', () => {
   it('uses friendly copy for invalid_text and formula_prefix', () => {
     expect(friendlyMessage({ code: 'invalid_text', message: 'raw', field: 'note' }, 422)).toBe("This note has characters that aren't allowed.")
     expect(friendlyMessage({ code: 'formula_prefix', message: 'raw', field: 'note' }, 422)).toBe("This note can't start with =, +, - or @.")
+    expect(friendlyMessage({ code: 'formula_prefix', message: 'raw', field: 'dcreq' }, 422)).toBe("This DCREQ can't start with =, +, - or @.")
+    expect(friendlyMessage({ code: 'formula_prefix', message: 'raw', field: 'name' }, 422)).toBe("This name can't start with =, +, - or @.")
+    expect(friendlyMessage({ code: 'invalid_text', message: 'raw', field: 'description' }, 422)).toBe("This description has characters that aren't allowed.")
+    expect(textRejectionCopy('formula_prefix', 'description')).toBe("This description can't start with =, +, - or @.")
+  })
+
+  it('allows formula-prefixed and multiline notes, and rejects those on name/dcreq/description', () => {
+    expect(jobTextViolation('note', '=SUM(A1)\nSecond', 'note')).toBeNull()
+    expect(jobTextViolation('note', 'ok\tindented', 'note')).toBeNull()
+    expect(jobTextViolation('note', 'bad\u0001', 'note')?.code).toBe('invalid_text')
+    expect(jobTextViolation('name', '=Leaf', 'single_line')?.code).toBe('formula_prefix')
+    expect(jobTextViolation('dcreq', '=DCREQ0001234', 'single_line')?.field).toBe('dcreq')
+    expect(jobTextViolation('description', 'line1\nline2', 'single_line')?.code).toBe('invalid_text')
   })
 
   it('strips pydantic validation text as a fallback', () => {
@@ -384,5 +397,25 @@ describe('note validation copy', () => {
       detail: [{ type: 'value_error', loc: ['body'], msg: 'Value error, note must not contain control characters' }],
     })
     expect(noteFieldError(pydantic)).toBe("This note has characters that aren't allowed.")
+  })
+})
+
+describe('job text fields', () => {
+  it('rejects a formula-prefixed job name and description without rewriting the value', async () => {
+    await expect(api().createJob('DCREQ0008001', { name: '=Leaf' })).rejects.toMatchObject({
+      status: 422, code: 'formula_prefix',
+    })
+    const err = await api().createJob('DCREQ0008001', { name: '=Leaf' }).catch((e) => e)
+    expect(errorDetail(err.detail)?.field).toBe('name')
+    expect(textFieldError(err, 'name')).toBe("This name can't start with =, +, - or @.")
+    await expect(api().createJob('DCREQ0008001', { description: '-48V writeup' })).rejects.toMatchObject({
+      status: 422, code: 'formula_prefix',
+    })
+    const ok = await api().createJob('DCREQ0008001', { name: 'Leaf refresh', description: 'Normal text' })
+    expect(ok.name).toBe('Leaf refresh')
+    expect(ok.description).toBe('Normal text')
+    const resolved = await api().resolveItem(ok.id, (await api().listOpenItems(ok.id, 'unresolved')).items[0].id, '-48V DC feed\nsecond')
+    expect(resolved.item.note).toMatch(/-48V DC feed/)
+    expect(resolved.item.note).toMatch(/second/)
   })
 })

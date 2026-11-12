@@ -96,6 +96,19 @@ describe('DCREQ step', () => {
     expect(screen.getByLabelText('DCREQ')).toHaveValue('')
     expect(screen.getByRole('button', { name: 'Next: ePIF' })).toBeDisabled()
   })
+
+  it('shows formula_prefix under Name and does not rewrite the typed value', async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<App />, '/jobs/new')
+    await screen.findByRole('heading', { name: 'New job' })
+    await user.type(screen.getByLabelText('DCREQ'), 'DCREQ0008010')
+    await user.type(screen.getByLabelText('Name'), '=Leaf refresh')
+    await user.click(screen.getByRole('button', { name: 'Next: ePIF' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(/name can't start with =, \+, - or @/)
+    expect(screen.getByLabelText('Name')).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByLabelText('Name')).toHaveValue('=Leaf refresh')
+  })
+
 })
 
 describe('CSV upload, preview and import result', () => {

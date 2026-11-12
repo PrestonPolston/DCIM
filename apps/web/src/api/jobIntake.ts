@@ -278,7 +278,7 @@ export interface OpenItemWriteResult {
 }
 
 export interface JobIntakeApi {
-  createJob(dcreq: string): Promise<Job>
+  createJob(dcreq: string, fields?: { name?: string | null; description?: string | null }): Promise<Job>
   getJob(idOrDcreq: number | string): Promise<Job>
   listJobs(params?: JobListParams): Promise<{ items: Job[]; total: number }>
   closeJob(id: number, opts?: { acknowledge_open_items?: boolean; note?: string | null }): Promise<CloseJobResult>
@@ -573,7 +573,14 @@ function pendingFromImport(imp: JobImport): JobOpenItem[] {
 
 function liveApi(): JobIntakeApi {
   return {
-    createJob: (dcreq) => request<Job>('/jobs', { method: 'POST', body: JSON.stringify({ dcreq: normalizeDcreq(dcreq) }) }),
+    createJob: (dcreq, fields) => request<Job>('/jobs', {
+      method: 'POST',
+      body: JSON.stringify({
+        dcreq,
+        ...(fields?.name != null && fields.name !== '' ? { name: fields.name } : {}),
+        ...(fields?.description != null && fields.description !== '' ? { description: fields.description } : {}),
+      }),
+    }),
     getJob: (idOrDcreq) => request<Job>(`/jobs/${encodeURIComponent(String(idOrDcreq))}`),
     listJobs: (params = {}) => listPage<Job>('/jobs', params),
     closeJob: (id, opts = {}) =>

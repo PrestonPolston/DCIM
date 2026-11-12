@@ -49,6 +49,62 @@ const COPY: Record<string, string> = {
   formula_prefix: "This note can't start with =, +, - or @.",
 }
 
+const TEXT_FIELD_LABELS: Record<string, string> = {
+  note: 'note',
+  dcreq: 'DCREQ',
+  name: 'name',
+  description: 'description',
+}
+
+/** Friendly copy for coded job-intake text 422s, with the field name when we have it. */
+export function textRejectionCopy(code: 'invalid_text' | 'formula_prefix', field?: string | null): string {
+  const label = (field && TEXT_FIELD_LABELS[field]) || 'text'
+  if (code === 'formula_prefix') return `This ${label} can't start with =, +, - or @.`
+  return `This ${label} has characters that aren't allowed.`
+}
+
+/** True when a trimmed value starts with a spreadsheet-formula character. */
+export function startsWithFormulaPrefix(value: string): boolean {
+  return /^[=+\-@]/.test(value.trim())
+}
+
+/**
+ * Simulate the API's job-intake text rules (docs/API.md at 2282a2a).
+ * Notes may contain \n and tab and may start with = + - @; other controls are invalid_text.
+ * name, description and dcreq are single-line and keep the formula guard.
+ * The client must not rewrite the user's input; this is only for the mock and live-route fixture.
+ */
+export function jobTextViolation(
+  field: string,
+  value: string | null | undefined,
+  kind: 'note' | 'single_line' = field === 'note' ? 'note' : 'single_line',
+): { code: 'invalid_text' | 'formula_prefix'; message: string; field: string } | null {
+  if (value == null) return null
+  const stored = kind === 'note' ? value.replace(/\r\n/g, '\n') : value
+  const trimmed = stored.trim()
+  if (kind === 'single_line') {
+    if (!trimmed) return null
+    if (startsWithFormulaPrefix(trimmed)) {
+      return { code: 'formula_prefix', message: textRejectionCopy('formula_prefix', field), field }
+    }
+    if ([...trimmed].some((ch) => {
+      const c = ch.charCodeAt(0)
+      return c < 32 || c === 127
+    })) {
+      return { code: 'invalid_text', message: textRejectionCopy('invalid_text', field), field }
+    }
+    return null
+  }
+  if (!stored) return null
+  if ([...stored].some((ch) => {
+    const c = ch.charCodeAt(0)
+    return (c < 32 && ch !== '\n' && ch !== '\t') || c === 127
+  })) {
+    return { code: 'invalid_text', message: textRejectionCopy('invalid_text', field), field }
+  }
+  return null
+}
+
 /** 409 on editing a flagged device: the code is its needs_review_reason (lifecycle.py _check_flagged_edit). */
 const FLAGGED: Record<string, string> = {
   placed_without_profile: 'This device was placed without a profile. Choose a profile, unplace it, or decommission it before other edits.',
@@ -77,6 +133,9 @@ export function errorDetail(detail: unknown): ErrorDetail | null {
 
 export function friendlyMessage(d: ErrorDetail, status?: number): string | null {
   if (!d.code) return null
+  if (d.code === 'invalid_text' || d.code === 'formula_prefix') {
+    return textRejectionCopy(d.code, d.field)
+  }
   const base = (status === 409 && FLAGGED[d.code]) || COPY[d.code]
   if (!base) return null
   if (d.code === 'profile_not_usable') {
@@ -102,14 +161,22 @@ export function friendlyMessage(d: ErrorDetail, status?: number): string | null 
 }
 
 /** Turn a pydantic/FastAPI validation message into readable copy. */
-export function stripPydanticText(msg: string): string {
+export function stripPydanticText(msg: string, field?: string | null): string {
   let s = msg.trim()
-  s = s.replace(/^(?:body\.)?([A-Za-z0-9_]+):\s*/i, (_, field: string) => (field === 'note' ? '' : `${field}: `))
+  let inferred = field ?? null
+  s = s.replace(/^(?:body\.)?([A-Za-z0-9_]+):\s*/i, (_, loc: string) => {
+    inferred = inferred ?? loc.toLowerCase()
+    return loc.toLowerCase() === 'note' ? '' : `${loc}: `
+  })
   s = s.replace(/^Value error,\s*/i, '')
   s = s.replace(/^assertion failed,\s*/i, '')
   s = s.trim()
-  if (/must not contain control characters/i.test(s)) return COPY.invalid_text
-  if (/must not start with|= \+ - @|spreadsheet formula/i.test(s)) return COPY.formula_prefix
+  if (!inferred) {
+    const m = s.match(/\b(note|dcreq|name|description)\b/i)
+    if (m) inferred = m[1].toLowerCase()
+  }
+  if (/must not contain control characters/i.test(s)) return textRejectionCopy('invalid_text', inferred)
+  if (/must not start with|= \+ - @|spreadsheet formula/i.test(s)) return textRejectionCopy('formula_prefix', inferred)
   return s
 }
 
@@ -125,17 +192,31 @@ export function formatValidationErrors(details: unknown[]): string {
   }).filter(Boolean).join('; ')
 }
 
-/** Inline / page copy for a note-field 422 (coded or leftover pydantic text). */
-export function noteFieldError(e: unknown): string | null {
+/** Inline copy for a coded or leftover-pydantic text 422 on a specific field. */
+export function textFieldError(e: unknown, field?: string | null): string | null {
   const err = e as { code?: string | null; status?: number; detail?: unknown; message?: string }
   const d = errorDetail(err.detail)
-  if (d?.code === 'invalid_text' || d?.code === 'formula_prefix' || err.code === 'invalid_text' || err.code === 'formula_prefix') {
-    return friendlyMessage(d ?? { code: err.code ?? undefined }, err.status) ?? err.message ?? COPY[err.code ?? d?.code ?? ''] ?? null
+  const code = d?.code ?? err.code
+  const errField = d?.field ?? field
+  if (code === 'invalid_text' || code === 'formula_prefix') {
+    if (field && errField && errField !== field) return null
+    return friendlyMessage({ ...(d ?? {}), code, field: errField ?? field ?? undefined }, err.status)
+      ?? textRejectionCopy(code, errField ?? field)
   }
   const msg = typeof err.message === 'string' ? err.message : ''
   if (!msg) return null
-  const stripped = stripPydanticText(msg)
-  if (stripped === COPY.invalid_text || stripped === COPY.formula_prefix) return stripped
-  if (/control characters|spreadsheet formula|aren't allowed|can't start with =/i.test(msg)) return stripped
+  const stripped = stripPydanticText(msg, field)
+  if (/control characters|spreadsheet formula|aren't allowed|can't start with =/i.test(msg) ||
+      /aren't allowed|can't start with =/.test(stripped)) {
+    if (field && !new RegExp(field, 'i').test(msg) && !new RegExp(field, 'i').test(stripped) && !/note/i.test(field)) {
+      // still accept generic control/formula phrasing when the field was not named
+    }
+    return stripped
+  }
   return null
+}
+
+/** Inline / page copy for a note-field 422 (coded or leftover pydantic text). */
+export function noteFieldError(e: unknown): string | null {
+  return textFieldError(e, 'note')
 }

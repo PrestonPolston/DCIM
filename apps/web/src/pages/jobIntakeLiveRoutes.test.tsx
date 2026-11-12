@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import App from '../App'
 import { JOB_INTAKE_API, jobIntakeApi, type Job, type JobOpenItem, type JobImport } from '../api/jobIntake'
 import { ApiError } from '../api/client'
-import { friendlyMessage, errorDetail } from '../api/errors'
+import { friendlyMessage, errorDetail, jobTextViolation } from '../api/errors'
 import { setCsrfToken } from '../api/client'
 import { installMockApi, resetAuth, seedDb } from '../test/mockApi'
 import { renderWithProviders } from '../test/render'
@@ -150,8 +150,12 @@ function installSlice2JobsApi() {
     jobCalls.push({ method, path: path + url.search, body: rawBody })
 
     if (path === '/jobs' && method === 'POST') {
-      let body: { dcreq?: string; name?: string } = {}
-      try { body = JSON.parse(rawBody ?? '{}') as { dcreq?: string; name?: string } } catch { /* ignore */ }
+      let body: { dcreq?: string; name?: string; description?: string } = {}
+      try { body = JSON.parse(rawBody ?? '{}') as { dcreq?: string; name?: string; description?: string } } catch { /* ignore */ }
+      for (const field of ['dcreq', 'name', 'description'] as const) {
+        const violation = jobTextViolation(field, body[field], 'single_line')
+        if (violation) return json({ detail: { code: violation.code, message: violation.message, field: violation.field } }, 422)
+      }
       const dcreq = (body.dcreq ?? '').trim().replace(/\s+/g, '').toUpperCase()
       const existing = jobs.find((j) => j.dcreq === dcreq)
       if (existing) {
@@ -455,16 +459,9 @@ function installSlice2JobsApi() {
       if (action === 'dismiss' && !body.note?.trim()) {
         return json({ detail: { code: 'note_required', message: 'Say why this item is dismissed', field: 'note' } }, 422)
       }
-      if (typeof body.note === 'string' && body.note.length) {
-        if (/^[=+\-@]/.test(body.note)) {
-          return json({ detail: { code: 'formula_prefix', message: "This note can't start with =, +, - or @.", field: 'note' } }, 422)
-        }
-        if ([...body.note].some((ch) => {
-          const c = ch.charCodeAt(0)
-          return ((c < 32 && ch !== '\n' && ch !== '\t') || c === 127)
-        })) {
-          return json({ detail: { code: 'invalid_text', message: "This note has characters that aren't allowed.", field: 'note' } }, 422)
-        }
+      const noteViolation = jobTextViolation('note', body.note, 'note')
+      if (noteViolation) {
+        return json({ detail: { code: noteViolation.code, message: noteViolation.message, field: 'note' } }, 422)
       }
       if (action === 'defer') {
         if (item.status !== 'open') return json({ detail: { code: 'open_item_state', message: 'That action is not valid' } }, 409)
@@ -723,7 +720,7 @@ describe('job intake live slice 2 routes (mocked fetch)', () => {
     expect(result).toHaveTextContent('Missing hostname')
   })
 
-  it('shows invalid_text and formula_prefix inline on the Note field, and keeps line breaks in a note', async () => {
+  it('allows a formula-prefixed and multiline note, and shows invalid_text inline on the Note field', async () => {
     JOB_INTAKE_API.cableImports = true
     const live = installSlice2JobsApi()
     const job = live.seedJob('DCREQ0001234', 'Leaf refresh')
@@ -732,18 +729,54 @@ describe('job intake live slice 2 routes (mocked fetch)', () => {
     renderWithProviders(<App />, '/jobs/DCREQ0001234')
     const positions = await screen.findByRole('region', { name: 'Missing position' })
     await user.click(within(positions).getByRole('button', { name: 'Resolve with note' }))
-    await user.type(screen.getByRole('textbox', { name: 'Note' }), '=SUM(A1)')
-    await user.click(screen.getByRole('button', { name: 'Save and resolve' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent(/can't start with =, \+, - or @/)
-    expect(screen.getByRole('textbox', { name: 'Note' })).toHaveAttribute('aria-invalid', 'true')
-    await user.clear(screen.getByRole('textbox', { name: 'Note' }))
-    await user.type(screen.getByRole('textbox', { name: 'Note' }), 'First line{Enter}Second line')
+    const note = screen.getByRole('textbox', { name: 'Note' })
+    await user.type(note, '=SUM(A1){Enter}Second line')
     await user.click(screen.getByRole('button', { name: 'Save and resolve' }))
     await waitFor(() => {
-      expect(live.jobCalls.some((c) => c.path.endsWith('/resolve') && c.body?.includes('First line\\nSecond line'))).toBe(true)
+      expect(live.jobCalls.some((c) => c.path.endsWith('/resolve') && c.body?.includes('=SUM(A1)\\nSecond line'))).toBe(true)
     })
     await user.click(screen.getByRole('tab', { name: /^Resolved$/ }))
-    expect(await screen.findByRole('region', { name: 'Missing position' })).toHaveTextContent(/First line/)
-    expect(screen.getByText(/First line/)).toHaveClass('job-item-note')
+    expect(await screen.findByRole('region', { name: 'Missing position' })).toHaveTextContent(/=SUM\(A1\)/)
+    expect(screen.getByText(/=SUM\(A1\)/)).toHaveClass('job-item-note')
+  })
+
+  it('shows invalid_text inline when a note has a disallowed control character', async () => {
+    const live = installSlice2JobsApi()
+    const job = live.seedJob('DCREQ0001234', 'Leaf refresh')
+    live.addFieldItem(job, 'nopos')
+    const user = userEvent.setup()
+    renderWithProviders(<App />, '/jobs/DCREQ0001234')
+    const positions = await screen.findByRole('region', { name: 'Missing position' })
+    await user.click(within(positions).getByRole('button', { name: 'Resolve with note' }))
+    const note = screen.getByRole('textbox', { name: 'Note' })
+    fireEvent.change(note, { target: { value: 'ok\u0001bad' } })
+    await user.click(screen.getByRole('button', { name: 'Save and resolve' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(/aren't allowed/)
+    expect(screen.getByRole('textbox', { name: 'Note' })).toHaveAttribute('aria-invalid', 'true')
+  })
+
+  it('shows formula_prefix inline on Name and DCREQ, and does not rewrite the typed value', async () => {
+    const live = installSlice2JobsApi()
+    const user = userEvent.setup()
+    renderWithProviders(<App />, '/jobs/new')
+    await screen.findByRole('heading', { name: 'New job' })
+    await user.type(screen.getByLabelText('DCREQ'), 'DCREQ0004321')
+    await user.type(screen.getByLabelText('Name'), '=Leaf refresh')
+    expect(screen.getByLabelText('Name')).toHaveValue('=Leaf refresh')
+    await user.click(screen.getByRole('button', { name: 'Next: ePIF' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(/name can't start with =, \+, - or @/)
+    expect(screen.getByLabelText('Name')).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByLabelText('Name')).toHaveValue('=Leaf refresh')
+    const create = live.jobCalls.find((c) => c.method === 'POST' && c.path === '/jobs')
+    expect(create?.body).toContain('=Leaf refresh')
+    expect(create?.body).toContain('DCREQ0004321')
+    await user.clear(screen.getByLabelText('Name'))
+    await user.clear(screen.getByLabelText('DCREQ'))
+    await user.type(screen.getByLabelText('DCREQ'), '=DCREQ0004321')
+    expect(screen.getByLabelText('DCREQ')).toHaveValue('=DCREQ0004321')
+    await user.click(screen.getByRole('button', { name: 'Next: ePIF' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(/DCREQ can't start with =, \+, - or @/)
+    expect(screen.getByLabelText('DCREQ')).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByLabelText('DCREQ')).toHaveValue('=DCREQ0004321')
   })
 })
