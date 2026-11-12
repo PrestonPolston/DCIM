@@ -6,6 +6,7 @@ import {
   isDuplicateDcreq,
   isValidDcreq,
   itemTypeLabel,
+  jobCableImportsAvailable,
   jobHref,
   jobImportsAvailable,
   jobIntakeApi,
@@ -58,7 +59,7 @@ function FileSlot({
       <h2>{label}</h2>
       {current ? (
         <p className="hint" role="status">
-          {current.filename}: {current.counts.total} rows · {current.counts.ready} ready · {current.counts.warning} warning · {current.counts.held} held · {current.counts.conflict} conflict
+          {current.filename ?? 'CSV'}: {current.counts.total} rows · {current.counts.ready} ready · {current.counts.warning} warning · {current.counts.held} held · {current.counts.conflict} conflict
         </p>
       ) : skipped ? (
         <p className="hint" role="status">Skipped. The {itemTypeLabel(kind === 'epif' ? 'epif_not_uploaded' : 'cable_matrix_not_uploaded')} item created with this job will stay open.</p>
@@ -105,6 +106,7 @@ export default function JobIntakePage() {
   const [result, setResult] = useState<IntakeCommitResult | null>(null)
   const [leaveConfirm, setLeaveConfirm] = useState(false)
   const importsAvailable = jobImportsAvailable()
+  const cableImportsAvailable = jobCableImportsAvailable()
 
   const canonical = raw.trim() ? normalizeDcreq(raw) : ''
   const valid = isValidDcreq(raw)
@@ -185,6 +187,10 @@ export default function JobIntakePage() {
 
   async function commit() {
     if (!job || !importsAvailable) return
+    if (!epif && !cable) {
+      finishWithoutImport()
+      return
+    }
     setBusy(true)
     setError(null)
     try {
@@ -344,6 +350,9 @@ export default function JobIntakePage() {
       {step === 2 && job && (
         <div className="card">
           {importUnavailableNote()}
+          {importsAvailable && !cableImportsAvailable && (
+            <p className="banner" role="note">Cable matrix import isn't available yet. Skip it; the Cable matrix not uploaded item will stay in this job's fill-later queue.</p>
+          )}
           {leaveBanner(job)}
           <FileSlot
             kind="cable_matrix"
@@ -351,7 +360,7 @@ export default function JobIntakePage() {
             current={cable}
             skipped={skipped.cable_matrix}
             disabled={!canWrite || busy}
-            uploadDisabled={!importsAvailable}
+            uploadDisabled={!importsAvailable || !cableImportsAvailable}
             onFile={(f) => void upload('cable_matrix', f)}
             onSkip={() => skip('cable_matrix')}
             onClear={() => clearFile('cable_matrix')}
@@ -401,7 +410,9 @@ export default function JobIntakePage() {
             <button type="button" disabled={busy} onClick={() => cancelIntake()}>Cancel intake</button>
             <button type="button" disabled={busy} onClick={() => { setResult(null); setStep(2) }}>Back</button>
             <button type="button" className="primary" disabled={!canWrite || !preview || busy} onClick={() => void commit()}>
-              Commit job{pending.length ? ` — ${pending.length} stay in queue` : ''}
+              {epif || cable
+                ? `Commit job${pending.length ? ` — ${pending.length} stay in queue` : ''}`
+                : 'Finish'}
             </button>
           </div>
         </div>

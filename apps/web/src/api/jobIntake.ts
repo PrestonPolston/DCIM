@@ -1,8 +1,8 @@
 // Job intake v1 adapter (docs/design/job-intake.md, docs/db/JOB_INTAKE.md).
-// Built API (Backend feat/job-intake-api @ bbff5fe, slice 1): POST/GET /jobs,
-// GET /jobs/{id_or_dcreq}, POST .../close (acknowledge_open_items), POST .../reopen,
-// GET .../open-items. Duplicate code is job_exists. Lists are arrays + X-Total-Count.
-// Import, skip, preview, commit, DELETE abandon, and open-item writes are not shipped yet.
+// Built API (Backend feat/job-intake-api @ 66b3370, slices 1–2): POST/GET /jobs,
+// close/reopen, open-items read + defer/undefer/dismiss/resolve, ePIF
+// POST /imports (raw text/csv), GET import detail (the preview), commit.
+// No GET /preview, no /fill, no cable-matrix import, no DELETE abandon yet.
 import { ApiError, API_BASE_URL, getCsrfToken, listPage, request } from './client'
 import { errorDetail, friendlyMessage, type ExistingJobRef } from './errors'
 import { parseApiDate } from '../lib/apiDate'
@@ -11,10 +11,12 @@ import { createMockJobIntakeApi } from './jobIntake.mock'
 export const JOB_INTAKE_API = {
   /** true = real /jobs endpoints; false = in-memory mock (tests and VITE_JOB_INTAKE_LIVE=false). */
   live: import.meta.env.VITE_JOB_INTAKE_LIVE !== 'false',
-  /** true = POST defer/undefer/dismiss/resolve/fill. Off until Backend ships those routes. */
-  openItemWrites: import.meta.env.VITE_JOB_INTAKE_ITEM_WRITES === 'true',
-  /** true = POST /imports, preview, commit. Off until Backend ships those routes. */
-  imports: import.meta.env.VITE_JOB_INTAKE_IMPORTS === 'true',
+  /** true = POST defer/undefer/dismiss/resolve (slice 2). Set to 'false' to disable. */
+  openItemWrites: import.meta.env.VITE_JOB_INTAKE_ITEM_WRITES !== 'false',
+  /** true = ePIF POST /imports and commit (slice 2). Set to 'false' to disable. */
+  imports: import.meta.env.VITE_JOB_INTAKE_IMPORTS !== 'false',
+  /** Cable-matrix import is slice 3 and not shipped yet. */
+  cableImports: import.meta.env.VITE_JOB_INTAKE_CABLE_IMPORTS === 'true',
 }
 
 /** Live API is on, but open-item write routes are not shipped yet. */
@@ -25,6 +27,16 @@ export function jobItemWritesAvailable(): boolean {
 /** Live API is on, but import/preview/commit routes are not shipped yet. */
 export function jobImportsAvailable(): boolean {
   return !JOB_INTAKE_API.live || JOB_INTAKE_API.imports
+}
+
+/** Cable-matrix CSV import is not in slice 2. */
+export function jobCableImportsAvailable(): boolean {
+  return !JOB_INTAKE_API.live || JOB_INTAKE_API.cableImports
+}
+
+/** Fill (write the target field, then resolve) is mock-only until a fill route ships. */
+export function jobFillAvailable(): boolean {
+  return !JOB_INTAKE_API.live
 }
 
 export const DCREQ_PATTERN = /^DCREQ000[0-9]{4}$/
@@ -117,6 +129,9 @@ export interface RowMessage {
   code: string
   field: string | null
   message: string
+  level?: 'conflict' | 'held' | 'warning' | 'info'
+  item_type?: string | null
+  target_field?: string | null
 }
 
 export interface ImportRow {
@@ -125,7 +140,10 @@ export interface ImportRow {
   result: ImportRowResult
   messages: RowMessage[]
   hostname: string | null
-  label: string | null
+  label?: string | null
+  epif_id?: string | null
+  rack?: string | null
+  ru?: string | null
 }
 
 export interface ImportCounts {
@@ -134,6 +152,8 @@ export interface ImportCounts {
   warning: number
   held: number
   conflict: number
+  committed?: number
+  skipped?: number
 }
 
 export interface JobImport {
@@ -141,13 +161,15 @@ export interface JobImport {
   job_id: number
   dcreq: string
   kind: ImportKind
-  filename: string
+  filename: string | null
   sha256: string
   status: ImportStatus
   uploaded_at: string
   uploaded_by: string | null
+  change_set_id?: number | null
   counts: ImportCounts
-  rows: ImportRow[]
+  reupload?: 'review' | 'committed' | null
+  rows?: ImportRow[]
 }
 
 export interface JobOpenItem {
@@ -343,6 +365,93 @@ export function jobHref(job: Pick<Job, 'id' | 'dcreq'>): string {
   return `/jobs/${encodeURIComponent(job.dcreq)}`
 }
 
+type OpenItemWriteResult = { item: JobOpenItem; job: Job }
+
+async function writeOpenItem(path: string, body?: unknown): Promise<JobOpenItem> {
+  const res = await request<OpenItemWriteResult | JobOpenItem>(path, {
+    method: 'POST',
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
+  return res && typeof res === 'object' && 'item' in res ? res.item : res as JobOpenItem
+}
+
+type LiveSkipped = {
+  import_id: number
+  kind: ImportKind
+  row_number: number
+  hostname: string | null
+  epif_id?: string | null
+  reasons?: RowMessage[]
+  messages?: RowMessage[]
+}
+
+type LiveCommit = {
+  job: Job
+  imports: JobImport[]
+  skipped?: LiveSkipped[]
+  skipped_conflicts?: SkippedConflictRow[]
+  warnings: IntakeWarning[]
+  open_item_count: number
+}
+
+async function normalizeLiveCommit(jobId: number, raw: LiveCommit): Promise<IntakeCommitResult> {
+  const page = await listPage<JobOpenItem>(`/jobs/${jobId}/open-items`, { status: 'unresolved' })
+  const skipped = raw.skipped_conflicts ?? (raw.skipped ?? []).map((row) => ({
+    import_id: row.import_id,
+    kind: row.kind,
+    row_number: row.row_number,
+    hostname: row.hostname,
+    label: row.epif_id ?? null,
+    messages: row.messages ?? row.reasons ?? [],
+  }))
+  return {
+    job: raw.job,
+    imports: raw.imports,
+    warnings: raw.warnings,
+    skipped_conflicts: skipped,
+    open_item_count: raw.open_item_count,
+    items: page.items,
+  }
+}
+
+function pendingFromImport(imp: JobImport): JobOpenItem[] {
+  const rows = imp.rows ?? []
+  const pending: JobOpenItem[] = []
+  for (const row of rows) {
+    for (const msg of row.messages) {
+      if (!msg.item_type) continue
+      if (row.result !== 'warning' && row.result !== 'held' && row.result !== 'conflict') continue
+      pending.push({
+        id: -(row.id * 100 + pending.length + 1),
+        job_id: imp.job_id,
+        dcreq: imp.dcreq,
+        item_type: msg.item_type as OpenItemType,
+        status: 'open',
+        target_field: msg.target_field ?? null,
+        note: msg.message,
+        source: imp.kind,
+        epif_request_id: null,
+        device_id: null,
+        device_psu_assignment_id: null,
+        connection_id: null,
+        cable_id: null,
+        import_row_id: row.id,
+        filename: imp.filename,
+        hostname: row.hostname,
+        cable_label: null,
+        trail: null,
+        created_at: imp.uploaded_at,
+        created_by: imp.uploaded_by,
+        deferred_at: null,
+        deferred_by: null,
+        resolved_at: null,
+        resolved_by: null,
+      })
+    }
+  }
+  return pending
+}
+
 function liveApi(): JobIntakeApi {
   return {
     createJob: (dcreq) => request<Job>('/jobs', { method: 'POST', body: JSON.stringify({ dcreq: normalizeDcreq(dcreq) }) }),
@@ -366,17 +475,16 @@ function liveApi(): JobIntakeApi {
     // DELETE /jobs/{id} (abandon) is not in the committed API. The wizard must not call this when live.
     abandonJob: (id) => request<void>(`/jobs/${id}`, { method: 'DELETE' }),
     async stageImport(jobId, kind, file) {
-      const form = new FormData()
-      form.append('kind', kind)
-      form.append('file', file)
-      const res = await fetch(`${API_BASE_URL}/jobs/${jobId}/imports`, {
+      const qs = new URLSearchParams({ kind, filename: file.name })
+      const res = await fetch(`${API_BASE_URL}/jobs/${jobId}/imports?${qs}`, {
         method: 'POST',
         credentials: 'include',
         headers: {
           Accept: 'application/json',
+          'Content-Type': 'text/csv',
           ...(getCsrfToken() ? { 'X-CSRF-Token': getCsrfToken()! } : {}),
         },
-        body: form,
+        body: await file.text(),
       })
       if (!res.ok) {
         const detail = await res.json().catch(() => undefined)
@@ -393,21 +501,47 @@ function liveApi(): JobIntakeApi {
       }
       return (await res.json()) as JobImport
     },
-    previewJob: (jobId) => request<IntakePreview>(`/jobs/${jobId}/preview`),
-    commitImport: (jobId, importId) =>
-      request<IntakeCommitResult>(`/jobs/${jobId}/imports/${importId}/commit`, { method: 'POST' }),
-    commitIntake: (jobId) => request<IntakeCommitResult>(`/jobs/${jobId}/commit`, { method: 'POST' }),
+    async previewJob(jobId) {
+      const staged = await listPage<JobImport>(`/jobs/${jobId}/imports`, { status: 'review' })
+      const details = await Promise.all(
+        staged.items.map((imp) => request<JobImport>(`/jobs/${jobId}/imports/${imp.id}`)),
+      )
+      const epif = details.find((i) => i.kind === 'epif') ?? null
+      const cable = details.find((i) => i.kind === 'cable_matrix') ?? null
+      const job = await request<Job>(`/jobs/${jobId}`)
+      const open = await listPage<JobOpenItem>(`/jobs/${jobId}/open-items`, { status: 'unresolved' })
+      const existing = open.items.filter((item) => {
+        if (epif && item.item_type === 'epif_not_uploaded') return false
+        if (cable && item.item_type === 'cable_matrix_not_uploaded') return false
+        return true
+      })
+      const fromFiles = details.flatMap(pendingFromImport)
+      return {
+        job,
+        epif,
+        cable_matrix: cable,
+        skipped: { epif: !epif, cable_matrix: !cable },
+        pending_items: [...existing, ...fromFiles],
+      }
+    },
+    async commitImport(jobId, importId) {
+      const raw = await request<LiveCommit>(`/jobs/${jobId}/imports/${importId}/commit`, { method: 'POST' })
+      return normalizeLiveCommit(jobId, raw)
+    },
+    async commitIntake(jobId) {
+      const raw = await request<LiveCommit>(`/jobs/${jobId}/commit`, { method: 'POST' })
+      return normalizeLiveCommit(jobId, raw)
+    },
     listOpenItems: (jobId, status = 'unresolved') => listPage<JobOpenItem>(`/jobs/${jobId}/open-items`, { status }),
     deferItem: (jobId, itemId, note = null) =>
-      request<JobOpenItem>(`/jobs/${jobId}/open-items/${itemId}/defer`, { method: 'POST', body: JSON.stringify({ note }) }),
+      writeOpenItem(`/jobs/${jobId}/open-items/${itemId}/defer`, { note }),
     undeferItem: (jobId, itemId) =>
-      request<JobOpenItem>(`/jobs/${jobId}/open-items/${itemId}/undefer`, { method: 'POST' }),
+      writeOpenItem(`/jobs/${jobId}/open-items/${itemId}/undefer`),
     dismissItem: (jobId, itemId, note) =>
-      request<JobOpenItem>(`/jobs/${jobId}/open-items/${itemId}/dismiss`, { method: 'POST', body: JSON.stringify({ note }) }),
+      writeOpenItem(`/jobs/${jobId}/open-items/${itemId}/dismiss`, { note }),
     resolveItem: (jobId, itemId) =>
-      request<JobOpenItem>(`/jobs/${jobId}/open-items/${itemId}/resolve`, { method: 'POST' }),
-    fillItem: (jobId, itemId, value) =>
-      request<JobOpenItem>(`/jobs/${jobId}/open-items/${itemId}/fill`, { method: 'POST', body: JSON.stringify({ value }) }),
+      writeOpenItem(`/jobs/${jobId}/open-items/${itemId}/resolve`),
+    fillItem: () => Promise.reject(new ApiError(404, 'Filling a field arrives with a later API update.', { detail: { code: 'not_found', message: 'Filling a field arrives with a later API update.' } })),
   }
 }
 

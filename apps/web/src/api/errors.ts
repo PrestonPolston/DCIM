@@ -35,7 +35,15 @@ const COPY: Record<string, string> = {
   job_already_closed: 'This job is already closed.',
   job_already_open: 'This job is already open.',
   job_not_found: 'Job not found.',
+  import_kind_not_available: "Cable matrix import isn't available yet. Skip it; the item will stay in the fill-later queue.",
+  job_closed: 'This job is closed. Reopen it to import files.',
+  no_review_imports: 'There are no imports in review on this job.',
+  import_not_in_review: "This import isn't in review.",
+  note_required: 'A note is required to dismiss an item.',
+  open_item_closed: 'This item is already completed.',
+  open_item_state: "That action isn't valid for this item's current status.",
 }
+
 /** 409 on editing a flagged device: the code is its needs_review_reason (lifecycle.py _check_flagged_edit). */
 const FLAGGED: Record<string, string> = {
   placed_without_profile: 'This device was placed without a profile. Choose a profile, unplace it, or decommission it before other edits.',

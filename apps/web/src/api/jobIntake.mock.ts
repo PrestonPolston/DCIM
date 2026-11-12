@@ -246,21 +246,21 @@ function finalizeCommit(job: Job, batches: JobImport[]): IntakeCommitResult {
   const skipped_conflicts: SkippedConflictRow[] = []
   for (const batch of batches) {
     if (batch.status !== 'review') continue
-    for (const row of batch.rows) {
+    for (const row of (batch.rows ?? [])) {
       if (row.result === 'conflict') {
         skipped_conflicts.push({
           import_id: batch.id,
           kind: batch.kind,
           row_number: row.row_number,
           hostname: row.hostname,
-          label: row.label,
+          label: row.label ?? null,
           messages: row.messages,
         })
         addItem({
           job_id: job.id, dcreq: job.dcreq, item_type: 'other', status: 'open',
           target_field: row.messages[0]?.field ?? 'hostname', note: row.messages[0]?.message ?? null,
-          source: batch.kind, import_row_id: row.id, filename: batch.filename, hostname: row.hostname,
-          cable_label: row.label, trail: null, epif_request_id: null, device_id: null,
+          source: batch.kind, import_row_id: row.id, filename: batch.filename ?? null, hostname: row.hostname,
+          cable_label: row.label ?? null, trail: null, epif_request_id: null, device_id: null,
           device_psu_assignment_id: null, connection_id: null, cable_id: null,
           created_by: ACTOR, deferred_at: null, deferred_by: null, resolved_at: null, resolved_by: null,
         })
@@ -280,8 +280,8 @@ function finalizeCommit(job: Job, batches: JobImport[]): IntakeCommitResult {
         addItem({
           job_id: job.id, dcreq: job.dcreq, item_type: type, status: 'open',
           target_field: row.messages[0]?.field ?? null, note: null, source: batch.kind,
-          import_row_id: row.id, filename: batch.filename, hostname: row.hostname,
-          cable_label: row.label, trail: null, epif_request_id: null, device_id: null,
+          import_row_id: row.id, filename: batch.filename ?? null, hostname: row.hostname,
+          cable_label: row.label ?? null, trail: null, epif_request_id: null, device_id: null,
           device_psu_assignment_id: null, connection_id: null, cable_id: null,
           created_by: ACTOR, deferred_at: null, deferred_by: null, resolved_at: null, resolved_by: null,
         })
@@ -293,7 +293,7 @@ function finalizeCommit(job: Job, batches: JobImport[]): IntakeCommitResult {
       }
     }
     batch.status = 'committed'
-    batch.counts = countsOf(batch.rows)
+    batch.counts = countsOf((batch.rows ?? []))
     resolveSkipItem(job, batch.kind)
   }
   job.updated_at = iso()
@@ -469,7 +469,7 @@ export function createMockJobIntakeApi(): JobIntakeApi {
       const pending: JobOpenItem[] = []
       for (const batch of [epif, cable]) {
         if (!batch || batch.status === 'committed') continue
-        for (const row of batch.rows) {
+        for (const row of (batch.rows ?? [])) {
           if (row.result === 'ready') continue
           pending.push({
             id: 0,
@@ -486,9 +486,9 @@ export function createMockJobIntakeApi(): JobIntakeApi {
             connection_id: null,
             cable_id: null,
             import_row_id: row.id,
-            filename: batch.filename,
+            filename: batch.filename ?? null,
             hostname: row.hostname,
-            cable_label: row.label,
+            cable_label: row.label ?? null,
             trail: null,
             created_at: iso(),
             created_by: ACTOR,
