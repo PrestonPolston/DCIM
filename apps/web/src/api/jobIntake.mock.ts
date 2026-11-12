@@ -288,7 +288,7 @@ function finalizeCommit(job: Job, batches: JobImport[]): IntakeCommitResult {
       }
       if (row.result === 'ready' || row.result === 'warning') {
         if (batch.kind === 'epif') job.device_count += 1
-        if (batch.kind === 'cable_matrix') job.connection_count += 1
+        if (batch.kind === 'cable_matrix') job.connection_count = (job.connection_count ?? 0) + 1
         row.result = 'committed'
       }
     }
@@ -391,7 +391,7 @@ export function createMockJobIntakeApi(): JobIntakeApi {
       const job = findJob(id)
       const committed = store.imports.some((i) => i.job_id === id && i.status === 'committed')
       const resolved = store.items.some((i) => i.job_id === id && (i.status === 'resolved' || i.status === 'dismissed'))
-      if (committed || resolved || job.device_count > 0 || job.connection_count > 0) {
+      if (committed || resolved || job.device_count > 0 || (job.connection_count ?? 0) > 0) {
         throwApi(409, 'job_not_empty', 'This job already has committed work, so it can’t be deleted. Close it instead.')
       }
       store.imports = store.imports.filter((i) => i.job_id !== id)
@@ -533,31 +533,32 @@ export function createMockJobIntakeApi(): JobIntakeApi {
       item.status = 'deferred'
       item.deferred_at = iso()
       item.deferred_by = ACTOR
-      if (note != null) item.note = note
-      return item
+      if (note != null) item.note = note ? `Deferred: ${note}` : item.note
+      return { item, job: flags(findJob(jobId)) }
     },
     async undeferItem(jobId, itemId) {
       const item = getItem(jobId, itemId)
       item.status = 'open'
       item.deferred_at = null
       item.deferred_by = null
-      return item
+      return { item, job: flags(findJob(jobId)) }
     },
     async dismissItem(jobId, itemId, note) {
-      if (!note || !note.trim()) throwApi(422, 'validation', 'A note is required to dismiss an item.')
+      if (!note || !note.trim()) throwApi(422, 'note_required', 'A note is required to dismiss an item.')
       const item = getItem(jobId, itemId)
       item.status = 'dismissed'
-      item.note = note
+      item.note = `Dismissed: ${note}`
       item.resolved_at = iso()
       item.resolved_by = ACTOR
-      return item
+      return { item, job: flags(findJob(jobId)) }
     },
-    async resolveItem(jobId, itemId) {
+    async resolveItem(jobId, itemId, note = null) {
       const item = getItem(jobId, itemId)
       item.status = 'resolved'
       item.resolved_at = iso()
       item.resolved_by = ACTOR
-      return item
+      if (note && note.trim()) item.note = `Resolved: ${note.trim()}`
+      return { item, job: flags(findJob(jobId)) }
     },
     async fillItem(jobId, itemId, value) {
       const trimmed = value.trim()
@@ -568,7 +569,7 @@ export function createMockJobIntakeApi(): JobIntakeApi {
       item.status = 'resolved'
       item.resolved_at = iso()
       item.resolved_by = ACTOR
-      return item
+      return { item, job: flags(findJob(jobId)) }
     },
   }
 }

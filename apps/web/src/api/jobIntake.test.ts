@@ -217,8 +217,10 @@ describe('imports and commit', () => {
     expect((await api().getJob(job.id)).device_count).toBe(2)
 
     const deferred = await api().deferItem(job.id, result.items.find((i) => i.item_type === 'missing_position')!.id, 'fill later')
-    expect(deferred.status).toBe('deferred')
-    expect(deferred.deferred_by).toBeTruthy()
+    expect(deferred.item.status).toBe('deferred')
+    expect(deferred.item.deferred_by).toBeTruthy()
+    expect(deferred.job.unresolved_count).toBe(result.open_item_count)
+    expect(deferred.job.deferred_count).toBeGreaterThan(0)
     const open = await api().listOpenItems(job.id, 'unresolved')
     expect(open.total).toBe(3)
     expect(open.items.filter((i) => i.status === 'deferred')).toHaveLength(1)
@@ -271,10 +273,11 @@ describe('fill item', () => {
       import_row_id: 99,
     })
     const filled = await api().fillItem(job.id, item.id, '42')
-    expect(filled.status).toBe('resolved')
-    expect(filled.filled_value).toBe('42')
-    expect(filled.note).toBe('position_u=42')
-    expect((await api().getJob(job.id)).unresolved_count).toBe(2) // two not-uploaded items remain; seeded item resolved
+    expect(filled.item.status).toBe('resolved')
+    expect(filled.item.filled_value).toBe('42')
+    expect(filled.item.note).toBe('position_u=42')
+    expect(filled.job.unresolved_count).toBe(2) // two not-uploaded items remain; seeded item resolved
+    expect((await api().getJob(job.id)).unresolved_count).toBe(2)
     void seeded
   })
 })

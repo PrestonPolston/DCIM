@@ -7,12 +7,12 @@ import {
   isJobHasOpenItems,
   isJobOverdue,
   itemTypeLabel,
-  jobFillAvailable,
   jobIntakeApi,
   jobItemWritesAvailable,
   type CloseWarning,
   type JobOpenItem,
   type OpenItemListStatus,
+  type OpenItemWriteResult,
 } from '../api/jobIntake'
 import { useCan } from '../auth/auth'
 
@@ -46,7 +46,6 @@ export default function JobPage() {
   const justCreated = params.get('created') === '1'
   const canWrite = useCan('job.write')
   const writesAvailable = jobItemWritesAvailable()
-  const fillAvailable = jobFillAvailable()
   const canAct = canWrite && writesAvailable
   const qc = useQueryClient()
   const [filter, setFilter] = useState<OpenItemListStatus>('unresolved')
@@ -100,10 +99,16 @@ export default function JobPage() {
     onError: (e) => setError(e instanceof Error ? e.message : 'Reopen failed.'),
   })
 
-  async function runItem(op: () => Promise<unknown>) {
+  async function runItem(op: () => Promise<OpenItemWriteResult | JobOpenItem>) {
     setError(null)
     try {
-      await op()
+      const res = await op()
+      const next = res && typeof res === 'object' && 'job' in res ? (res as OpenItemWriteResult).job : undefined
+      if (next) {
+        void qc.setQueryData(['jobs', idOrDcreq], next)
+        void qc.setQueryData(['jobs', next.dcreq], next)
+        void qc.setQueryData(['jobs', String(next.id)], next)
+      }
       setDismissFor(null)
       setFillFor(null)
       setFillValue('')
@@ -226,9 +231,8 @@ export default function JobPage() {
                           </button>
                           <button
                             type="button"
-                            disabled={!canAct || !fillAvailable}
-                            title={!fillAvailable ? 'Filling a field arrives with a later API update.' : undefined}
-                            onClick={() => { if (canAct && fillAvailable) { setFillFor(item.id); setFillValue(''); setDismissFor(null) } }}
+                            disabled={!canAct}
+                            onClick={() => { if (canAct) { setFillFor(item.id); setFillValue(''); setDismissFor(null) } }}
                           >
                             Fill
                           </button>
@@ -259,7 +263,7 @@ export default function JobPage() {
                           </button>
                         </div>
                       )}
-                      {canAct && fillAvailable && fillFor === item.id && (
+                      {canAct && fillFor === item.id && (
                         <label className="field">
                           {item.target_field ? `Value for ${item.target_field}` : 'Value'}
                           <input

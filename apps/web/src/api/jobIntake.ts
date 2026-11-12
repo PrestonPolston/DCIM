@@ -34,9 +34,9 @@ export function jobCableImportsAvailable(): boolean {
   return !JOB_INTAKE_API.live || JOB_INTAKE_API.cableImports
 }
 
-/** Fill (write the target field, then resolve) is mock-only until a fill route ships. */
+/** Fill is available whenever open-item writes are: mock writes the field, live resolves with a note. */
 export function jobFillAvailable(): boolean {
-  return !JOB_INTAKE_API.live
+  return jobItemWritesAvailable()
 }
 
 export const DCREQ_PATTERN = /^DCREQ000[0-9]{4}$/
@@ -99,8 +99,8 @@ export interface Job {
   unresolved_count: number
   deferred_count: number
   device_count: number
-  /** Mock and later slices; Backend slice 1 (bbff5fe) does not return this yet. */
-  connection_count: number
+  /** Not in the committed /jobs contract; later slices may add it. */
+  connection_count?: number
   /** Detail only (GET /jobs/{key} and POST /jobs). */
   unresolved_by_type?: Record<string, number>
 }
@@ -181,16 +181,16 @@ export interface JobOpenItem {
   target_field: string | null
   note: string | null
   source: OpenItemSource
-  epif_request_id: number | null
+  epif_request_id?: number | null
   device_id: number | null
-  device_psu_assignment_id: number | null
+  device_psu_assignment_id?: number | null
   connection_id: number | null
   cable_id: number | null
   import_row_id: number | null
   filename: string | null
   hostname: string | null
   cable_label: string | null
-  trail: string | null
+  trail?: string | null
   created_at: string
   created_by: string | null
   deferred_at: string | null
@@ -236,6 +236,11 @@ export interface IntakeCommitResult {
   items: JobOpenItem[]
 }
 
+export interface OpenItemWriteResult {
+  item: JobOpenItem
+  job: Job
+}
+
 export interface JobIntakeApi {
   createJob(dcreq: string): Promise<Job>
   getJob(idOrDcreq: number | string): Promise<Job>
@@ -250,12 +255,12 @@ export interface JobIntakeApi {
   /** POST /jobs/{id}/commit — every batch still in review. */
   commitIntake(jobId: number): Promise<IntakeCommitResult>
   listOpenItems(jobId: number, status?: OpenItemListStatus): Promise<{ items: JobOpenItem[]; total: number }>
-  deferItem(jobId: number, itemId: number, note?: string | null): Promise<JobOpenItem>
-  undeferItem(jobId: number, itemId: number): Promise<JobOpenItem>
-  dismissItem(jobId: number, itemId: number, note: string): Promise<JobOpenItem>
-  resolveItem(jobId: number, itemId: number): Promise<JobOpenItem>
-  /** Write a value for target_field, then mark the item resolved (mock; live when writes ship). */
-  fillItem(jobId: number, itemId: number, value: string): Promise<JobOpenItem>
+  deferItem(jobId: number, itemId: number, note?: string | null): Promise<OpenItemWriteResult>
+  undeferItem(jobId: number, itemId: number): Promise<OpenItemWriteResult>
+  dismissItem(jobId: number, itemId: number, note: string): Promise<OpenItemWriteResult>
+  resolveItem(jobId: number, itemId: number, note?: string | null): Promise<OpenItemWriteResult>
+  /** Mock: write target_field then resolve. Live: POST resolve with the value as a note. */
+  fillItem(jobId: number, itemId: number, value: string): Promise<OpenItemWriteResult>
 }
 
 /** Trim, strip spaces, uppercase; rebuild a paste of the full id, 000XXXX, or the last 4 digits. */
@@ -365,14 +370,13 @@ export function jobHref(job: Pick<Job, 'id' | 'dcreq'>): string {
   return `/jobs/${encodeURIComponent(job.dcreq)}`
 }
 
-type OpenItemWriteResult = { item: JobOpenItem; job: Job }
-
-async function writeOpenItem(path: string, body?: unknown): Promise<JobOpenItem> {
+async function writeOpenItem(path: string, body?: unknown): Promise<OpenItemWriteResult> {
   const res = await request<OpenItemWriteResult | JobOpenItem>(path, {
     method: 'POST',
     body: body === undefined ? undefined : JSON.stringify(body),
   })
-  return res && typeof res === 'object' && 'item' in res ? res.item : res as JobOpenItem
+  if (res && typeof res === 'object' && 'item' in res) return res
+  return { item: res as JobOpenItem, job: await request<Job>(`/jobs/${(res as JobOpenItem).job_id}`) }
 }
 
 type LiveSkipped = {
@@ -539,9 +543,10 @@ function liveApi(): JobIntakeApi {
       writeOpenItem(`/jobs/${jobId}/open-items/${itemId}/undefer`),
     dismissItem: (jobId, itemId, note) =>
       writeOpenItem(`/jobs/${jobId}/open-items/${itemId}/dismiss`, { note }),
-    resolveItem: (jobId, itemId) =>
-      writeOpenItem(`/jobs/${jobId}/open-items/${itemId}/resolve`),
-    fillItem: () => Promise.reject(new ApiError(404, 'Filling a field arrives with a later API update.', { detail: { code: 'not_found', message: 'Filling a field arrives with a later API update.' } })),
+    resolveItem: (jobId, itemId, note = null) =>
+      writeOpenItem(`/jobs/${jobId}/open-items/${itemId}/resolve`, note != null ? { note } : {}),
+    fillItem: (jobId, itemId, value) =>
+      writeOpenItem(`/jobs/${jobId}/open-items/${itemId}/resolve`, { note: value }),
   }
 }
 
