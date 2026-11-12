@@ -7297,7 +7297,7 @@
           "jobs"
         ],
         "summary": "List Open Items",
-        "description": "The job's fill-later queue (read-only in this slice). unresolved = open + deferred.",
+        "description": "The job's fill-later queue. unresolved = open + deferred.",
         "operationId": "list_open_items_jobs__job_key__open_items_get",
         "parameters": [
           {
@@ -7366,6 +7366,474 @@
                     "$ref": "#/components/schemas/OpenItem"
                   },
                   "title": "Response List Open Items Jobs  Job Key  Open Items Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{job_key}/open-items/{item_id}/{action}": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Open Item Action",
+        "description": "defer (open -> deferred, note optional), undefer (deferred -> open), dismiss (note REQUIRED: 422\nnote_required), resolve (note optional). Resolved/dismissed items are final: 409 open_item_closed.",
+        "operationId": "open_item_action_jobs__job_key__open_items__item_id___action__post",
+        "parameters": [
+          {
+            "name": "job_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Key"
+            }
+          },
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Item Id"
+            }
+          },
+          {
+            "name": "action",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": [
+                "defer",
+                "undefer",
+                "dismiss",
+                "resolve"
+              ],
+              "type": "string",
+              "title": "Action"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ItemNote"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenItemResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{job_key}/imports": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Upload Import",
+        "description": "Stage a CSV on an EXISTING job (a CSV never creates a job) and return the validated preview.\nBody: the raw file with Content-Type: text/csv. Nothing live is written until commit.",
+        "operationId": "upload_import_jobs__job_key__imports_post",
+        "parameters": [
+          {
+            "name": "job_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Key"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "epif",
+                "cable_matrix"
+              ],
+              "type": "string",
+              "default": "epif",
+              "title": "Kind"
+            }
+          },
+          {
+            "name": "filename",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 255
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Filename"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobImportDetail"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Same file already uploaded to this job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobImportDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "text/csv": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "List Imports",
+        "operationId": "list_imports_jobs__job_key__imports_get",
+        "parameters": [
+          {
+            "name": "job_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Key"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "review",
+                    "committed",
+                    "abandoned"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "description": "Max items to return",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "Max items to return"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Items to skip",
+              "default": 0,
+              "title": "Offset"
+            },
+            "description": "Items to skip"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/JobImport"
+                  },
+                  "title": "Response List Imports Jobs  Job Key  Imports Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{job_key}/imports/{import_id}": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Get Import",
+        "description": "The preview: every staged row with its result and messages.",
+        "operationId": "get_import_jobs__job_key__imports__import_id__get",
+        "parameters": [
+          {
+            "name": "job_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Key"
+            }
+          },
+          {
+            "name": "import_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Import Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobImportDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{job_key}/imports/{import_id}/abandon": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Abandon Import",
+        "operationId": "abandon_import_jobs__job_key__imports__import_id__abandon_post",
+        "parameters": [
+          {
+            "name": "job_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Key"
+            }
+          },
+          {
+            "name": "import_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Import Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobImport"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{job_key}/imports/{import_id}/commit": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Commit Import",
+        "description": "Commit one batch. Rows are re-validated; conflict rows are skipped with reasons, the rest is written in\none change set. 409 import_not_in_review if the batch is committed or abandoned.",
+        "operationId": "commit_import_jobs__job_key__imports__import_id__commit_post",
+        "parameters": [
+          {
+            "name": "job_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Key"
+            }
+          },
+          {
+            "name": "import_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Import Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommitResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{job_key}/commit": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Commit Job",
+        "description": "Commit every batch of this job still in review, oldest first, in one change set.\n409 no_review_imports when there is nothing to commit.",
+        "operationId": "commit_job_jobs__job_key__commit_post",
+        "parameters": [
+          {
+            "name": "job_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommitResult"
                 }
               }
             }
@@ -8748,6 +9216,239 @@
         },
         "type": "object",
         "title": "CloneIn"
+      },
+      "CommitResult": {
+        "properties": {
+          "job": {
+            "$ref": "#/components/schemas/JobDetail"
+          },
+          "imports": {
+            "items": {
+              "$ref": "#/components/schemas/JobImport"
+            },
+            "type": "array",
+            "title": "Imports"
+          },
+          "committed": {
+            "items": {
+              "$ref": "#/components/schemas/CommitRow"
+            },
+            "type": "array",
+            "title": "Committed"
+          },
+          "held": {
+            "items": {
+              "$ref": "#/components/schemas/CommitRow"
+            },
+            "type": "array",
+            "title": "Held"
+          },
+          "skipped": {
+            "items": {
+              "$ref": "#/components/schemas/CommitRow"
+            },
+            "type": "array",
+            "title": "Skipped",
+            "description": "Conflict rows, not written; each has its reasons"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/CommitWarning"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "open_items_created": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Open Items Created"
+          },
+          "open_item_count": {
+            "type": "integer",
+            "title": "Open Item Count",
+            "description": "The job's unresolved (open + deferred) items after the commit"
+          },
+          "resolved_item_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Resolved Item Ids",
+            "description": "Items auto-resolved (e.g. epif_not_uploaded)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job",
+          "imports",
+          "committed",
+          "held",
+          "skipped",
+          "warnings",
+          "open_items_created",
+          "open_item_count",
+          "resolved_item_ids"
+        ],
+        "title": "CommitResult"
+      },
+      "CommitRow": {
+        "properties": {
+          "import_id": {
+            "type": "integer",
+            "title": "Import Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "epif",
+              "cable_matrix"
+            ],
+            "title": "Kind"
+          },
+          "row_number": {
+            "type": "integer",
+            "title": "Row Number"
+          },
+          "epif_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Epif Id"
+          },
+          "hostname": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hostname"
+          },
+          "device_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Id"
+          },
+          "epif_request_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Epif Request Id"
+          },
+          "reasons": {
+            "items": {
+              "$ref": "#/components/schemas/RowMessage"
+            },
+            "type": "array",
+            "title": "Reasons",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "import_id",
+          "kind",
+          "row_number",
+          "epif_id",
+          "hostname"
+        ],
+        "title": "CommitRow"
+      },
+      "CommitWarning": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field"
+          },
+          "item_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Type"
+          },
+          "target_field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Field"
+          },
+          "import_id": {
+            "type": "integer",
+            "title": "Import Id"
+          },
+          "row_number": {
+            "type": "integer",
+            "title": "Row Number"
+          },
+          "hostname": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hostname"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "message",
+          "field",
+          "item_type",
+          "target_field",
+          "import_id",
+          "row_number",
+          "hostname"
+        ],
+        "title": "CommitWarning"
       },
       "Connection": {
         "properties": {
@@ -12501,6 +13202,49 @@
         ],
         "title": "ImageMeta"
       },
+      "ImportCounts": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "ready": {
+            "type": "integer",
+            "title": "Ready"
+          },
+          "warning": {
+            "type": "integer",
+            "title": "Warning"
+          },
+          "held": {
+            "type": "integer",
+            "title": "Held"
+          },
+          "conflict": {
+            "type": "integer",
+            "title": "Conflict"
+          },
+          "committed": {
+            "type": "integer",
+            "title": "Committed"
+          },
+          "skipped": {
+            "type": "integer",
+            "title": "Skipped"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "ready",
+          "warning",
+          "held",
+          "conflict",
+          "committed",
+          "skipped"
+        ],
+        "title": "ImportCounts"
+      },
       "ImportResult": {
         "properties": {
           "dry_run": {
@@ -12545,6 +13289,151 @@
         ],
         "title": "ImportResult"
       },
+      "ImportRow": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "row_number": {
+            "type": "integer",
+            "title": "Row Number",
+            "description": "1-based data row (header excluded)"
+          },
+          "result": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "warning",
+              "held",
+              "conflict",
+              "committed",
+              "skipped"
+            ],
+            "title": "Result"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/RowMessage"
+            },
+            "type": "array",
+            "title": "Messages"
+          },
+          "epif_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Epif Id"
+          },
+          "action": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action"
+          },
+          "hostname": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hostname"
+          },
+          "row": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Row"
+          },
+          "rack": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rack"
+          },
+          "ru": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ru"
+          },
+          "cells": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Cells",
+            "description": "The staged row by canonical column (secrets are never staged)"
+          },
+          "device_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Id"
+          },
+          "epif_request_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Epif Request Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "row_number",
+          "result",
+          "messages",
+          "epif_id",
+          "action",
+          "hostname",
+          "row",
+          "rack",
+          "ru",
+          "cells",
+          "device_id",
+          "epif_request_id"
+        ],
+        "title": "ImportRow"
+      },
       "ImportRowError": {
         "properties": {
           "row": {
@@ -12574,6 +13463,25 @@
           "errors"
         ],
         "title": "ImportRowError"
+      },
+      "ItemNote": {
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ItemNote"
       },
       "Job": {
         "properties": {
@@ -13029,6 +13937,230 @@
         ],
         "title": "JobDetail"
       },
+      "JobImport": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "job_id": {
+            "type": "integer",
+            "title": "Job Id"
+          },
+          "dcreq": {
+            "type": "string",
+            "title": "Dcreq"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "epif",
+              "cable_matrix"
+            ],
+            "title": "Kind"
+          },
+          "filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filename"
+          },
+          "sha256": {
+            "type": "string",
+            "title": "Sha256"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "review",
+              "committed",
+              "abandoned"
+            ],
+            "title": "Status"
+          },
+          "uploaded_at": {
+            "type": "string",
+            "title": "Uploaded At"
+          },
+          "uploaded_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uploaded By"
+          },
+          "change_set_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Set Id"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/ImportCounts"
+          },
+          "reupload": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "review",
+                  "committed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reupload",
+            "description": "Set when the same file (sha256) was already uploaded to this job: 'review' = the batch was re-validated in place; 'committed' = nothing new was staged"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "job_id",
+          "dcreq",
+          "kind",
+          "filename",
+          "sha256",
+          "status",
+          "uploaded_at",
+          "uploaded_by",
+          "change_set_id",
+          "counts"
+        ],
+        "title": "JobImport"
+      },
+      "JobImportDetail": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "job_id": {
+            "type": "integer",
+            "title": "Job Id"
+          },
+          "dcreq": {
+            "type": "string",
+            "title": "Dcreq"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "epif",
+              "cable_matrix"
+            ],
+            "title": "Kind"
+          },
+          "filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filename"
+          },
+          "sha256": {
+            "type": "string",
+            "title": "Sha256"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "review",
+              "committed",
+              "abandoned"
+            ],
+            "title": "Status"
+          },
+          "uploaded_at": {
+            "type": "string",
+            "title": "Uploaded At"
+          },
+          "uploaded_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uploaded By"
+          },
+          "change_set_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Set Id"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/ImportCounts"
+          },
+          "reupload": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "review",
+                  "committed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reupload",
+            "description": "Set when the same file (sha256) was already uploaded to this job: 'review' = the batch was re-validated in place; 'committed' = nothing new was staged"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/ImportRow"
+            },
+            "type": "array",
+            "title": "Rows"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "job_id",
+          "dcreq",
+          "kind",
+          "filename",
+          "sha256",
+          "status",
+          "uploaded_at",
+          "uploaded_by",
+          "change_set_id",
+          "counts",
+          "rows"
+        ],
+        "title": "JobImportDetail"
+      },
       "JobReopen": {
         "properties": {
           "note": {
@@ -13368,6 +14500,17 @@
             ],
             "title": "Source"
           },
+          "epif_request_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Epif Request Id"
+          },
           "device_id": {
             "anyOf": [
               {
@@ -13434,7 +14577,7 @@
               }
             ],
             "title": "Hostname",
-            "description": "Joined from the device (not stored)"
+            "description": "Joined from the device, else the ePIF request's requested name (not stored)"
           },
           "cable_label": {
             "anyOf": [
@@ -13518,6 +14661,7 @@
           "target_field",
           "note",
           "source",
+          "epif_request_id",
           "device_id",
           "connection_id",
           "cable_id",
@@ -13533,6 +14677,22 @@
           "resolved_by"
         ],
         "title": "OpenItem"
+      },
+      "OpenItemResult": {
+        "properties": {
+          "item": {
+            "$ref": "#/components/schemas/OpenItem"
+          },
+          "job": {
+            "$ref": "#/components/schemas/JobDetail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "item",
+          "job"
+        ],
+        "title": "OpenItemResult"
       },
       "ParkedTile": {
         "properties": {
@@ -15879,6 +17039,71 @@
           "racks"
         ],
         "title": "RowLayout"
+      },
+      "RowMessage": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "conflict",
+              "held",
+              "warning",
+              "info"
+            ],
+            "title": "Level",
+            "description": "conflict = row skipped; held = request kept, no device; warning = written + fill-later item"
+          },
+          "item_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Type",
+            "description": "Open item this message becomes on commit (if any)"
+          },
+          "target_field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Field"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "field",
+          "message",
+          "level"
+        ],
+        "title": "RowMessage"
       },
       "RowSearchGroup": {
         "properties": {

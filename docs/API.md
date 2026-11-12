@@ -69,7 +69,7 @@ Device enums: `status` is one of `install | active | decom`, default **`install`
   |---|---|---|---|
   | GET anything (except below) | yes | yes | yes |
   | `/users`, `/audit-events` | yes | no | no |
-  | Create/patch devices, CSV import, create device types and profiles, create/close/reopen jobs | yes | yes | no |
+  | Create/patch devices, CSV import, create device types and profiles, create/close/reopen jobs, job CSV imports and open-item actions | yes | yes | no |
   | Move a cabinet (PATCH `/racks/{id}` with only `pos_x`, `pos_y`, `orientation`) | yes | yes | no |
   | Create/patch/delete sites, halls, rows, cabinets; delete devices; patch/delete device types and profiles | yes | no | no |
   Wrong role → 403; no session → 401.
@@ -481,7 +481,7 @@ A cabinet profile describes the cabinet alone, with doors and rails included. It
 
 **Audit.** Every action is in `audit_events` with `entity_type=cabinet_profile`, under a change set: `cabinet_profile.create|update|delete` (the listener; delete carries the full snapshot) and `cabinet_profile.publish|retire|unretire|clone|image.put|image.delete`.
 
-## Jobs (job intake v1, slice 1; migrations `p1_30_project_dcreq` … `p1_33_job_open_items`)
+## Jobs (job intake v1, slices 1–2; migrations `p1_30_project_dcreq` … `p1_33b_epif_requests`)
 
 Spec: `docs/db/JOB_INTAKE.md` (D104–D109) and `docs/design/job-intake.md`. A **job** is a `projects` row whose **primary DCREQ** (`project_references(kind='DCREQ')`, `projects.primary_dcreq_id`) is the job number. Projects without a primary DCREQ (legacy) are not jobs and are not listed. Reads: every signed-in role. Writes: **technician or admin** (read-only 403 `Requires role: admin or technician`; no session 401). Timestamps are UTC with `Z`.
 
@@ -494,11 +494,15 @@ Spec: `docs/db/JOB_INTAKE.md` (D104–D109) and `docs/design/job-intake.md`. A *
 | `GET /jobs/{id_or_dcreq}` | any | `JobDetail`. A numeric key is the id; anything else is normalized as a DCREQ. Unknown or soft-deleted → **404** `job_not_found`. |
 | `POST /jobs/{id_or_dcreq}/close` `{acknowledge_open_items?: bool, note?}` | tech/admin | With unresolved items (open + deferred) and no `acknowledge_open_items: true` → **409** `{code: "job_has_open_items", message, unresolved_count}`, nothing changes. `message` is plain text the web can show as-is (it never names request fields). Otherwise **200** `{job: JobDetail, warning: {code: "job_has_open_items", message, unresolved_count} | null}`. Sets `closed_at`/`closed_by`; items stay. Already closed → 409 `job_already_closed`. Audit `job.close` (with the count and whether it was acknowledged). Body is optional when there are no unresolved items. |
 | `POST /jobs/{id_or_dcreq}/reopen` `{note?}` | tech/admin | **200** `{job: JobDetail}`. `status=open`, `closed_at`/`closed_by` cleared. **`opened_at` is never rewritten**, so the 30-day clock keeps running from DCREQ entry. Already open → 409 `job_already_open`. Audit `job.reopen`. |
-| `GET /jobs/{id_or_dcreq}/open-items?status=unresolved|open|deferred|resolved|dismissed|all` | any | `OpenItem[]` (default `unresolved` = open + deferred), `X-Total-Count`, oldest first. `filename`, `hostname`, `cable_label` are joined at read time. Defer/undefer/resolve/dismiss come with the import slices. |
+| `GET /jobs/{id_or_dcreq}/open-items?status=unresolved|open|deferred|resolved|dismissed|all` | any | `OpenItem[]` (default `unresolved` = open + deferred), `X-Total-Count`, oldest first. `filename`, `hostname` (device, else the ePIF request's name), `cable_label` are joined at read time. |
+| `POST /jobs/{id_or_dcreq}/open-items/{item_id}/defer` `{note?}` | tech/admin | open → deferred (`deferred_at/by` set). See **Open-item actions**. |
+| `POST /jobs/{id_or_dcreq}/open-items/{item_id}/undefer` | tech/admin | deferred → open. |
+| `POST /jobs/{id_or_dcreq}/open-items/{item_id}/dismiss` `{note}` | tech/admin | open/deferred → dismissed. **`note` required** (blank → 422 `note_required`). |
+| `POST /jobs/{id_or_dcreq}/open-items/{item_id}/resolve` `{note?}` | tech/admin | open/deferred → resolved. |
 
 **Job** fields: `id, dcreq, name, description, site_id, primary_dcreq_id, status (open|closed), opened_at, closed_at, closed_by, created_at, updated_at, created_by`, and computed (never stored): `current` (open and not deleted), `overdue` (current and `opened_at` more than 30 days ago), `overdue_at` (`opened_at` + 30 days), `days_open` (whole days since `opened_at`), `recently_closed` (closed and `closed_at` within 30 days), `days_since_closed`, `unresolved_count` (open + deferred items), `deferred_count`, `device_count` (live devices with this `project_id`). **JobDetail** adds `unresolved_by_type` `{item_type: n}`.
 
-**OpenItem** fields: `id, job_id, dcreq, item_type, status (open|deferred|resolved|dismissed), target_field, note, source (epif|cable_matrix|manual), device_id, connection_id, cable_id, import_row_id, filename, hostname, cable_label, created_at, created_by, deferred_at, deferred_by, resolved_at, resolved_by`. `item_type` is one of `epif_not_uploaded, cable_matrix_not_uploaded, missing_hostname, missing_profile, profile_not_usable, unresolved_cabinet, missing_position, missing_serial, missing_psu, psu_unparsed, pdu_missing, missing_port, unresolved_hop, missing_cable_label, missing_trail, media_missing, ip_missing, space_power_flag, other`.
+**OpenItem** fields: `id, job_id, dcreq, item_type, status (open|deferred|resolved|dismissed), target_field, note, source (epif|cable_matrix|manual), epif_request_id, device_id, connection_id, cable_id, import_row_id, filename, hostname, cable_label, created_at, created_by, deferred_at, deferred_by, resolved_at, resolved_by`. `item_type` is one of `epif_not_uploaded, cable_matrix_not_uploaded, missing_hostname, missing_profile, profile_not_usable, unresolved_cabinet, missing_position, missing_serial, missing_psu, psu_unparsed, pdu_missing, missing_port, unresolved_hop, missing_cable_label, missing_trail, media_missing, ip_missing, space_power_flag, other`.
 
 Example `POST /jobs` `{"dcreq": "DCREQ0001234", "name": "Leaf refresh"}` → 201:
 
@@ -521,4 +525,73 @@ Duplicate → 409:
 
 `POST /jobs/1/close` (no body) with items → 409 `{"detail": {"code": "job_has_open_items", "message": "This job still has 2 unresolved items. Close it anyway?", "unresolved_count": 2}}`; with `{"acknowledge_open_items": true}` → 200 `{"job": {…, "status": "closed", "closed_at": "…Z", "closed_by": "tech@example.com", "recently_closed": true}, "warning": {"code": "job_has_open_items", "message": "This job still has 2 unresolved items.", "unresolved_count": 2}}`.
 
-Not in this slice: ePIF and cable-matrix upload/preview/commit (`job_imports`, `import_rows` tables exist but have no routes yet), open-item defer/resolve/dismiss, abandon (`DELETE /jobs/{id}`), and the home job tiles (still parked).
+### Open-item actions (slice 2)
+
+`POST /jobs/{key}/open-items/{item_id}/{defer|undefer|dismiss|resolve}`, body `{note?}` (optional except for dismiss) → **200** `{item: OpenItem, job: JobDetail}`. A note is appended to the item's note as `Deferred: …` / `Dismissed: …` / `Resolved: …`. Resolve/dismiss set `resolved_at/by` and clear `deferred_at/by`. Errors: 404 `open_item_not_found` (unknown, or another job's item); 409 `open_item_closed` (already resolved/dismissed; final); 409 `open_item_state` (defer a deferred item, undefer an open one); 422 `note_required`; unknown action 422. Audit `job_open_item.defer|undefer|dismiss|resolve` with before/after.
+
+### ePIF import (slice 2)
+
+A CSV is always uploaded **onto an existing job** (`job_key` from step 1); it never creates one (unknown key → 404 `job_not_found`). Closed job → 409 `job_closed` (upload and commit). Writes need tech/admin.
+
+| Route | Role | Result |
+|---|---|---|
+| `POST /jobs/{key}/imports?kind=epif&filename=…` body = the file, `Content-Type: text/csv` | tech/admin | **201** `JobImportDetail` (status `review`, every row with `result` + `messages`). Same bytes (sha256) already on this job: **200**, `reupload: "review"` (same batch re-validated against today's DB) or `"committed"` (returned as-is, nothing staged). Nothing live is written. `kind=cable_matrix` → 422 `import_kind_not_available` (slice 3). Size/row caps and 413/415/NUL/UTF-8 errors are the device CSV ones (`csv_max_bytes`, `csv_max_rows`). |
+| `GET /jobs/{key}/imports?status=review|committed|abandoned` | any | `JobImport[]` (no rows), newest first, `X-Total-Count`, limit/offset. |
+| `GET /jobs/{key}/imports/{import_id}` | any | `JobImportDetail` (the preview). 404 `import_not_found`. |
+| `POST /jobs/{key}/imports/{import_id}/abandon` | tech/admin | **200** `JobImport` (status `abandoned`). Not in review → 409 `import_not_in_review`. |
+| `POST /jobs/{key}/imports/{import_id}/commit` | tech/admin | **200** `CommitResult`. Not in review → 409 `import_not_in_review`. |
+| `POST /jobs/{key}/commit` | tech/admin | **200** `CommitResult` for every batch still in review (oldest first, one change set). None → 409 `no_review_imports`. |
+
+**Headers.** Matched after trim/lowercase/punctuation → `_`: `ID` (ePIF ID), `Action`, `Name`/`Host Name`, `Manufacturer`/`Make`, `Model`, `Template`, `Managed By`, `App Service`, `Row`, `Rack`/`Cabinet`, `RU`/`U`, `Airflow`, `AC/DC`, `PSU Part #`, `PSU Position`, `PSU1`, `PSU2`, `S/N`/`Serial`, `DCREQ`. A secret-looking or iLO/iDRAC/BMC/IPMI header rejects the whole file: **422** `import_forbidden_columns` with `headers` (names only, never values); nothing is stored. Other header errors (422): `unknown_columns` / `duplicate_columns` (`columns`), `missing_columns` (`Name` is required), `import_empty`, `malformed_csv`, `too_many_rows`.
+
+**Row results** (`ready | warning | held | conflict`; after commit `committed | skipped`, held stays `held`). Each message is `{code, field, message, level, item_type, target_field}`; `level` decides the result (conflict > held > warning > info) and `item_type` is the open item it becomes on commit.
+
+| level | codes | on commit |
+|---|---|---|
+| conflict | `duplicate_epif_id` (in file), `epif_id_already_imported`, `hostname_conflict` (same name in that cabinet, DB or file), `serial_conflict` (DB incl. soft-deleted, or file), `ru_overlap` (DB or earlier row), `ru_out_of_range` | **skipped**, listed in `skipped[]` with `reasons`; an `other` item pointing at the staging row (`import_row_id`). The rest of the batch still commits. |
+| held | `missing_hostname`, `missing_profile` (no device type for Manufacturer + Model), `profile_not_usable`, `missing_cabinet`, `unresolved_cabinet`, `ambiguous_cabinet` (same row/rack names in several halls), `missing_position` (RU blank or not ≥ 1), `remove_not_applied` (Remove rows), `action_unknown` | an `epif_requests` row (status `open`, no device) + its items on `epif_request_id`. |
+| warning | `missing_serial`, `missing_psu` (PSU1/PSU2 empty; profiles have no PSU count yet, so 2 is assumed), `psu_unparsed`, `psu_not_assigned` (parsed PSU, PDU assignments don't exist yet → `pdu_missing`), `epif_id_format`, `power_type_unknown`, `power_type_mismatch`, `dcreq_format`/`dcreq_mismatch` (row DCREQ ≠ job; the job's DCREQ is used), `formula_text`, `value_truncated`, `epif_id_missing` | device created (status `install`, face front, `project_id` = job) + `epif_requests` row (status `done`) + items on `device_id`. |
+| info | `action_defaulted` (blank → Install), `epif_id_length` | — |
+
+Cabinet = `Row` + `Rack` names, case-insensitive, among live racks (inside the job's site when it has one). Profile = the device type's default profile, which must be published and usable. Placement goes through the device placement rules (fit, overlap, host name per cabinet). `Managed By` is matched to an existing group by name (never created); the text is kept on the request. PSU values like `A12`, `B-7`, `A` parse to feed/port and are stored in `epif_psus`.
+
+**Commit.** Rows are **re-validated** against the DB as it is now (it may have changed since the preview), then written in one change set; each device is created in a savepoint, so a late conflict skips only that row. Items are deduped per job + type + target + field (a re-raised unresolved item gets the new note and staging row instead of a duplicate). Committing an ePIF batch **auto-resolves `epif_not_uploaded`** (`resolved_item_ids`). Audit: `job_import.stage|commit|abandon`, `job_open_item.create|resolve`, and `device.import` per device.
+
+**CommitResult**: `{job: JobDetail, imports: JobImport[], committed[], held[], skipped[], warnings[], open_items_created: [id], open_item_count, resolved_item_ids: [id]}`; `committed/held/skipped` rows are `{import_id, kind, row_number, epif_id, hostname, device_id, epif_request_id, reasons[]}`; `warnings[]` are `{code, message, field, item_type, target_field, import_id, row_number, hostname}`.
+
+Example: upload (3 rows; row 2 repeats `web01` in R01, row 3 has no RU) → 201 (row 1 shown):
+
+```json
+{"id": 1, "job_id": 1, "dcreq": "DCREQ0001234", "kind": "epif", "filename": "epif-wk46.csv", "sha256": "0589…6fba",
+ "status": "review", "uploaded_at": "2026-11-12T14:22:17.735226Z", "uploaded_by": "tech@example.com", "change_set_id": null,
+ "counts": {"total": 3, "ready": 0, "warning": 1, "held": 1, "conflict": 1, "committed": 0, "skipped": 0}, "reupload": null,
+ "rows": [{"id": 1, "row_number": 1, "result": "warning",
+   "messages": [{"code": "psu_not_assigned", "field": "psu1", "level": "warning", "item_type": "pdu_missing", "target_field": "psu_1",
+                 "message": "PSU1 A12 (feed A, port 12) is staged; PDU assignments aren't available yet"}, …],
+   "epif_id": "10001", "action": "Install", "hostname": "web01", "row": "Row 1", "rack": "R01", "ru": "1",
+   "cells": {"epif_id": "10001", "action": "Install", "name": "web01", "manufacturer": "Acme", "model": "1U", "row": "Row 1",
+             "rack": "R01", "ru": "1", "ac_dc": "AC", "psu1": "A12", "psu2": "B12", "serial": "S1"},
+   "device_id": null, "epif_request_id": null}, …]}
+```
+
+`POST /jobs/1/imports/1/commit` → 200 (abridged):
+
+```json
+{"job": {"id": 1, "dcreq": "DCREQ0001234", "unresolved_count": 7, "device_count": 1,
+         "unresolved_by_type": {"cable_matrix_not_uploaded": 1, "missing_position": 1, "missing_psu": 1, "other": 1, "pdu_missing": 3}, …},
+ "imports": [{"id": 1, "status": "committed", "change_set_id": 6,
+              "counts": {"total": 3, "ready": 0, "warning": 0, "held": 1, "conflict": 0, "committed": 1, "skipped": 1}, …}],
+ "committed": [{"import_id": 1, "kind": "epif", "row_number": 1, "epif_id": "10001", "hostname": "web01", "device_id": 1, "epif_request_id": 1, "reasons": []}],
+ "held": [{"import_id": 1, "kind": "epif", "row_number": 3, "epif_id": "10003", "hostname": "web03", "device_id": null, "epif_request_id": 2,
+           "reasons": [{"code": "missing_position", "field": "ru", "message": "RU is missing", "level": "held", "item_type": "missing_position", "target_field": "position_u"}]}],
+ "skipped": [{"import_id": 1, "kind": "epif", "row_number": 2, "epif_id": "10002", "hostname": "web01", "device_id": null, "epif_request_id": null,
+              "reasons": [{"code": "hostname_conflict", "field": "name", "message": "Host name 'web01' is repeated for cabinet 'R01' in this file (row 1)",
+                           "level": "conflict", "item_type": "other", "target_field": "host_name"}]}],
+ "warnings": [{"code": "psu_not_assigned", "message": "PSU1 A12 (feed A, port 12) is staged; PDU assignments aren't available yet",
+               "field": "psu1", "item_type": "pdu_missing", "target_field": "psu_1", "import_id": 1, "row_number": 1, "hostname": "web01"}, …],
+ "open_items_created": [3, 4, 5, 6, 7, 8], "open_item_count": 7, "resolved_item_ids": [1]}
+```
+
+`POST /jobs/1/open-items/2/dismiss` `{}` → 422 `{"detail": {"code": "note_required", "message": "Say why this item is dismissed", "field": "note"}}`; resolving it twice → 409 `{"detail": {"code": "open_item_closed", "message": "This item is already resolved", "status": "resolved"}}`.
+
+Not yet: cable-matrix import and hops (slice 3, after `p1_34_cable_matrix_rest`), PDU/PSU assignments (PSUs stay staged + `pdu_missing`), applying Remove rows, re-import that fills empty fields on existing devices, abandon job (`DELETE /jobs/{id}`), and the home job tiles (still parked).
