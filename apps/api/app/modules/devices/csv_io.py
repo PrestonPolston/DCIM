@@ -13,7 +13,7 @@ from app.modules.devices.models import DeviceRow
 from app.modules.devices.schemas import DeviceCreate, ImportResult, ImportRowError
 from app.modules.audit.service import record_audit
 from app.settings import Settings, get_settings
-from app.validation import formula_problem, is_secret_name
+from app.validation import formula_problem, is_secret_name, neutralize_cell
 from app.modules.devices import lifecycle
 from app.modules.history.service import new_change_set
 
@@ -60,11 +60,9 @@ async def read_csv_body(request: Request, settings: Settings = Depends(get_setti
     return text
 
 
-# Prefix formula-looking text with ' so spreadsheets show it as text (OWASP CSV injection)
-def neutralize(value):
-    if isinstance(value, str) and formula_problem(value):
-        return "'" + value
-    return value
+# Prefix formula-looking text with ' so spreadsheets show it as text (OWASP CSV injection).
+# Kept as a name for existing callers; the single rule lives in app.validation.neutralize_cell.
+neutralize = neutralize_cell
 
 
 def export_devices(session: Session, devices: list[DeviceRow]) -> str:

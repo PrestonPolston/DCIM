@@ -5,7 +5,8 @@ from pydantic import BaseModel, ConfigDict, model_validator
 from pydantic_core import PydanticCustomError
 
 # Cells starting with these are spreadsheet formulas (OWASP CSV injection)
-FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
+FORMULA_CHARS = ("=", "+", "-", "@")
+FORMULA_START = (*FORMULA_CHARS, "\t", "\r")
 
 
 def formula_problem(value: str) -> bool:
@@ -13,8 +14,11 @@ def formula_problem(value: str) -> bool:
 
 
 def neutralize_cell(value):
-    """CSV export: prefix a quote so spreadsheets show formula-like text as text (OWASP)."""
-    if isinstance(value, str) and value.startswith(FORMULA_START):
+    """THE export helper (AUTH_RBAC_PLAN §7): every CSV/XLSX/download cell goes through this; see
+    tests/test_export_guards.py. Prefix ' so spreadsheets show formula-like text as text (OWASP) when the
+    value starts with = + - @, tab or CR, or when = + - @ follows leading whitespace (spaces, LF, NBSP, ...),
+    which some spreadsheet apps trim before evaluating."""
+    if isinstance(value, str) and (value.startswith(FORMULA_START) or value.lstrip().startswith(FORMULA_CHARS)):
         return "'" + value
     return value
 
