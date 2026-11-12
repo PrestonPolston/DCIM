@@ -527,6 +527,11 @@ Duplicate → 409:
 
 ### Open-item actions (slice 2)
 
+**Job-intake text rules.** Applies to the request bodies of `POST /jobs`, `close`, `reopen` and the open-item actions. Leading and trailing whitespace is trimmed everywhere.
+- **Notes** (`note` on `defer`, `undefer`, `dismiss` and `resolve`, and on `POST /jobs/{key}/close` and `reopen`) may be multi-line. `\n` and tab (`\t`) are kept, and `\r\n` is stored as `\n`. Every other control character is a 422 `invalid_text`: a lone `\r`, NUL, ESC, VT/FF, DEL and so on. A note made only of line breaks trims to empty, so `dismiss` still returns `note_required`. Notes **may** start with `= + - @` (e.g. `-48V DC feed`), because every CSV export (`/devices/export`, `/connections/export` and the removal-script CSV) prefixes `'` on formula cells on output, per AUTH_RBAC_PLAN §7.
+- **`name`, `description` and `dcreq`** stay single-line. Any control character (`\n`, `\r`, tab, NUL and so on) is a 422 `invalid_text`. They keep Security's formula guard: a value starting with `= + - @` is a 422 `formula_prefix`.
+- These rejections are one coded error that never echoes the value: `{"detail": {"code": "invalid_text" | "formula_prefix", "message": "...", "field": "<name>"}}`, e.g. `{"detail": {"code": "invalid_text", "message": "name must not contain control characters (it must be a single line)", "field": "name"}}` or `{"detail": {"code": "formula_prefix", "message": "description must not start with = + - @ (spreadsheet formula)", "field": "description"}}`. If several fields fail, the first one is reported. Other 422s on these bodies, such as an unknown field or a wrong type, keep the generic list, and other endpoints are unchanged.
+
 `POST /jobs/{key}/open-items/{item_id}/{defer|undefer|dismiss|resolve}`, body `{note?}` (optional except for dismiss) → **200** `{item: OpenItem, job: JobDetail}`. A note is appended to the item's note as `Deferred: …` / `Dismissed: …` / `Resolved: …`. Resolve/dismiss set `resolved_at/by` and clear `deferred_at/by`. Errors: 404 `open_item_not_found` (unknown, or another job's item); 409 `open_item_closed` (already resolved/dismissed; final); 409 `open_item_state` (defer a deferred item, undefer an open one); 422 `note_required`; unknown action 422. Audit `job_open_item.defer|undefer|dismiss|resolve` with before/after.
 
 ### ePIF import (slice 2)

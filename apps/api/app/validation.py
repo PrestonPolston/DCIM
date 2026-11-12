@@ -68,6 +68,15 @@ def merge_aliases(data: dict, fields) -> dict:
 class InputModel(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     check_input: ClassVar[bool] = True
+    # Free-text note fields: CRLF is normalised to LF; LF and tab are allowed. Every other control character
+    # (lone CR, NUL, ESC, VT, FF, DEL, ...) is still refused.
+    multiline_fields: ClassVar[frozenset[str]] = frozenset()
+    # Fields exempt from the formula-prefix rule (AUTH_RBAC_PLAN §7). Only for text that no CSV export writes
+    # un-neutralised: every CSV writer runs neutralize()/neutralize_cell() on output.
+    formula_allowed_fields: ClassVar[frozenset[str]] = frozenset()
+    # True: text-rule failures are one coded 422 {detail: {code: invalid_text|formula_prefix, message, field}}
+    # (see app.main) instead of the generic pydantic error list.
+    coded_text_errors: ClassVar[bool] = False
 
     @model_validator(mode="before")
     @classmethod
@@ -88,17 +97,32 @@ class InputModel(BaseModel):
     def _safe_strings(self):
         if not type(self).check_input:
             return self
+        cls = type(self)
         problems = []
         for name, value in self:
             if not isinstance(value, str):
                 continue
-            if formula_problem(value):
-                problems.append(f"{name} must not start with = + - @ (spreadsheet formula)")
-            elif any(ord(ch) < 32 or ord(ch) == 127 for ch in value):
-                problems.append(f"{name} must not contain control characters")
+            allowed = ""
+            if name in cls.multiline_fields:
+                value = value.replace("\r\n", "\n")
+                setattr(self, name, value)
+                allowed = "\n\t"
+            if name not in cls.formula_allowed_fields and formula_problem(value):
+                problems.append(("formula_prefix", name,
+                                 f"{name} must not start with = + - @ (spreadsheet formula)"))
+            elif any((ord(ch) < 32 or ord(ch) == 127) and ch not in allowed for ch in value):
+                problems.append(("invalid_text", name, f"{name} must not contain control characters"
+                                 + (" other than line breaks and tabs" if allowed else "")
+                                 + ("" if allowed or not cls.coded_text_errors else " (it must be a single line)")))
         if problems:
-            raise ValueError("; ".join(problems))
+            if cls.coded_text_errors:
+                code, name, message = problems[0]
+                raise PydanticCustomError(code, message, {"field": name})
+            raise ValueError("; ".join(m for _, _, m in problems))
         return self
+
+
+CODED_TEXT_ERRORS = ("invalid_text", "formula_prefix")
 
 
 # Response models built from DB rows: no input checks, extra attributes ignored

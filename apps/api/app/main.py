@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 import app.models  # noqa: F401  (registers tables)
+from app.validation import CODED_TEXT_ERRORS
 import app.modules.audit.listeners  # noqa: F401  (location/device-type audit events)
 from app.modules.audit.router import router as audit_router
 from app.modules.cabinet_profiles.router import images_router as cabinet_images_router, router as cabinet_profiles_router
@@ -60,7 +61,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # R-1: 422 bodies never echo submitted values (input/ctx dropped; secrets can't be reflected)
     @app.exception_handler(RequestValidationError)
     async def validation_error(_request: Request, exc: RequestValidationError):
-        detail = [{"type": e.get("type"), "loc": list(e.get("loc", ())), "msg": e.get("msg")} for e in exc.errors()]
+        errors = exc.errors()
+        coded = next((e for e in errors if e.get("type") in CODED_TEXT_ERRORS), None)
+        if coded is not None:  # models with coded_text_errors: one coded error, the field name only (no value)
+            return JSONResponse(status_code=422, content={"detail": {
+                "code": coded["type"], "message": coded.get("msg"), "field": (coded.get("ctx") or {}).get("field")}})
+        detail = [{"type": e.get("type"), "loc": list(e.get("loc", ())), "msg": e.get("msg")} for e in errors]
         return JSONResponse(status_code=422, content={"detail": detail})
 
     for router in (auth_router, users_router, audit_router, locations_router,

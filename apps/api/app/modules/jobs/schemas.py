@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import ClassVar, Literal
 
 from pydantic import BaseModel, Field
 
@@ -8,6 +8,7 @@ JobStatus = Literal["open", "closed"]
 
 
 class JobCreate(InputModel):
+    coded_text_errors: ClassVar[bool] = True  # name / description / dcreq: single line, formula guard kept
     dcreq: str = Field(max_length=64, description="DCREQ000 + 4 digits (e.g. DCREQ0001234); trimmed and "
                                                   "uppercased by the service. A bad value is 422 dcreq_format.")
     name: str | None = Field(None, min_length=1, max_length=255, description="Defaults to the DCREQ")
@@ -16,12 +17,18 @@ class JobCreate(InputModel):
 
 
 class JobClose(InputModel):
+    multiline_fields: ClassVar[frozenset[str]] = frozenset({"note"})  # \n, \t; \r\n -> \n
+    formula_allowed_fields: ClassVar[frozenset[str]] = frozenset({"note"})  # CSV exports neutralise on output
+    coded_text_errors: ClassVar[bool] = True
     acknowledge_open_items: bool = Field(False, description="Required (true) to close a job that still has "
                                                             "unresolved (open or deferred) items")
     note: str | None = Field(None, max_length=2000)
 
 
 class JobReopen(InputModel):
+    multiline_fields: ClassVar[frozenset[str]] = frozenset({"note"})  # \n, \t; \r\n -> \n
+    formula_allowed_fields: ClassVar[frozenset[str]] = frozenset({"note"})  # CSV exports neutralise on output
+    coded_text_errors: ClassVar[bool] = True
     note: str | None = Field(None, max_length=2000)
 
 
@@ -210,6 +217,9 @@ class CommitResult(BaseModel):
 
 
 class ItemNote(InputModel):
+    multiline_fields: ClassVar[frozenset[str]] = frozenset({"note"})  # \n, \t; \r\n -> \n
+    formula_allowed_fields: ClassVar[frozenset[str]] = frozenset({"note"})  # CSV exports neutralise on output
+    coded_text_errors: ClassVar[bool] = True
     note: str | None = Field(None, max_length=2000)
 
 
