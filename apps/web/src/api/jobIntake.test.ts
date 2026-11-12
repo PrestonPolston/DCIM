@@ -193,6 +193,7 @@ describe('imports and commit', () => {
     expect(result.items.some((i) => i.item_type === 'other' && i.hostname === 'CONFLICT-sw')).toBe(true)
     expect(result.items.some((i) => i.item_type === 'cable_matrix_not_uploaded')).toBe(true)
     expect(result.open_item_count).toBe(3)
+    expect((await api().getJob(job.id)).device_count).toBe(2)
 
     const deferred = await api().deferItem(job.id, result.items.find((i) => i.item_type === 'missing_position')!.id, 'fill later')
     expect(deferred.status).toBe('deferred')

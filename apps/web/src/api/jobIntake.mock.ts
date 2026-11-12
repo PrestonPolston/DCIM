@@ -70,11 +70,15 @@ function flags(job: Job, now = Date.now()): Job {
   }
 }
 
-function getJobOrThrow(idOrDcreq: number | string): Job {
+function findJob(idOrDcreq: number | string): Job {
   const key = String(idOrDcreq)
   const job = store.jobs.find((j) => String(j.id) === key || j.dcreq === normalizeDcreq(key) || j.dcreq === key)
   if (!job) throwApi(404, 'not_found', 'Job not found')
-  return flags(job)
+  return job
+}
+
+function getJobOrThrow(idOrDcreq: number | string): Job {
+  return flags(findJob(idOrDcreq))
 }
 
 function existingRef(job: Job) {
@@ -232,8 +236,8 @@ export function createMockJobIntakeApi(): JobIntakeApi {
       return { items: items.slice(off, off + lim), total }
     },
     async closeJob(id) {
-      const job = getJobOrThrow(id)
-      const unresolved = job.unresolved_count
+      const job = findJob(id)
+      const unresolved = flags(job).unresolved_count
       job.status = 'closed'
       job.closed_at = iso()
       job.closed_by = ACTOR
@@ -245,7 +249,7 @@ export function createMockJobIntakeApi(): JobIntakeApi {
       return { job: closed, warning }
     },
     async reopenJob(id) {
-      const job = getJobOrThrow(id)
+      const job = findJob(id)
       job.status = 'open'
       job.closed_at = null
       job.closed_by = null
@@ -253,7 +257,7 @@ export function createMockJobIntakeApi(): JobIntakeApi {
       return flags(job)
     },
     async abandonJob(id) {
-      const job = getJobOrThrow(id)
+      const job = findJob(id)
       const committed = store.imports.some((i) => i.job_id === id && i.status === 'committed')
       const resolved = store.items.some((i) => i.job_id === id && (i.status === 'resolved' || i.status === 'dismissed'))
       if (committed || resolved || job.device_count > 0 || job.connection_count > 0) {
@@ -377,7 +381,7 @@ export function createMockJobIntakeApi(): JobIntakeApi {
       return { job, epif, cable_matrix: cable, skipped, pending_items: pending }
     },
     async commitIntake(jobId) {
-      const job = getJobOrThrow(jobId)
+      const job = findJob(jobId)
       const batches = store.imports.filter((i) => i.job_id === jobId && i.status === 'review')
       const warnings: IntakeWarning[] = []
       const skipped_conflicts: SkippedConflictRow[] = []
