@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError } from '../api/client'
+import { noteFieldError } from '../api/errors'
 import {
   JOB_INTAKE_API,
   closeOpenItemsWarning,
@@ -60,6 +61,7 @@ export default function JobPage() {
   const [dismissNote, setDismissNote] = useState('')
   const [fillFor, setFillFor] = useState<number | null>(null)
   const [fillValue, setFillValue] = useState('')
+  const [noteError, setNoteError] = useState<string | null>(null)
 
   const jobQuery = useQuery({
     queryKey: ['jobs', idOrDcreq],
@@ -106,6 +108,7 @@ export default function JobPage() {
 
   async function runItem(op: () => Promise<OpenItemWriteResult | JobOpenItem>) {
     setError(null)
+    setNoteError(null)
     try {
       const res = await op()
       const next = res && typeof res === 'object' && 'job' in res ? (res as OpenItemWriteResult).job : undefined
@@ -120,7 +123,9 @@ export default function JobPage() {
       setDismissNote('')
       await invalidate()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'That change could not be saved.')
+      const inline = noteFieldError(e)
+      if (inline) setNoteError(inline)
+      else setError(e instanceof Error ? e.message : 'That change could not be saved.')
     }
   }
 
@@ -238,7 +243,7 @@ export default function JobPage() {
                           <button
                             type="button"
                             disabled={!canAct}
-                            onClick={() => { if (canAct) { setFillFor(item.id); setFillValue(''); setDismissFor(null) } }}
+                            onClick={() => { if (canAct) { setFillFor(item.id); setFillValue(''); setDismissFor(null); setNoteError(null) } }}
                           >
                             {JOB_INTAKE_API.live ? 'Resolve with note' : 'Fill'}
                           </button>
@@ -263,7 +268,7 @@ export default function JobPage() {
                           <button
                             type="button"
                             disabled={!canAct}
-                            onClick={() => { if (canAct) { setDismissFor(item.id); setDismissNote(''); setFillFor(null) } }}
+                            onClick={() => { if (canAct) { setDismissFor(item.id); setDismissNote(''); setFillFor(null); setNoteError(null) } }}
                           >
                             Dismiss
                           </button>
@@ -290,11 +295,13 @@ export default function JobPage() {
                               Note
                               <textarea
                                 value={fillValue}
-                                onChange={(e) => setFillValue(e.target.value)}
+                                onChange={(e) => { setFillValue(e.target.value); setNoteError(null) }}
                                 aria-label="Note"
+                                aria-invalid={noteError ? true : undefined}
                                 rows={3}
                               />
                             </label>
+                            {noteError && <p className="field-error" role="alert">{noteError}</p>}
                             <div className="actions">
                               <button type="button" onClick={() => setFillFor(null)}>Cancel</button>
                               <button
@@ -332,7 +339,13 @@ export default function JobPage() {
                       {canAct && dismissFor === item.id && (
                         <label className="field">
                           Dismiss note
-                          <input value={dismissNote} onChange={(e) => setDismissNote(e.target.value)} aria-label="Dismiss note" />
+                          <input
+                            value={dismissNote}
+                            onChange={(e) => { setDismissNote(e.target.value); setNoteError(null) }}
+                            aria-label="Dismiss note"
+                            aria-invalid={noteError ? true : undefined}
+                          />
+                          {noteError && <p className="field-error" role="alert">{noteError}</p>}
                           <div className="actions">
                             <button type="button" onClick={() => setDismissFor(null)}>Cancel</button>
                             <button

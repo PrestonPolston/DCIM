@@ -45,6 +45,8 @@ const COPY: Record<string, string> = {
   note_required: 'A note is required to dismiss an item.',
   open_item_closed: 'This item is already completed.',
   open_item_state: "That action isn't valid for this item's current status.",
+  invalid_text: "This note has characters that aren't allowed.",
+  formula_prefix: "This note can't start with =, +, - or @.",
 }
 
 /** 409 on editing a flagged device: the code is its needs_review_reason (lifecycle.py _check_flagged_edit). */
@@ -65,6 +67,7 @@ export interface ErrorDetail {
   headers?: string[]
   columns?: string[]
   unresolved_count?: number
+  field?: string
 }
 
 export function errorDetail(detail: unknown): ErrorDetail | null {
@@ -96,4 +99,43 @@ export function friendlyMessage(d: ErrorDetail, status?: number): string | null 
     return `This job still has ${n} unresolved item${n === 1 ? '' : 's'}. You can close it anyway.`
   }
   return d.missing?.length ? `${base} Missing: ${d.missing.join(', ')}.` : base
+}
+
+/** Turn a pydantic/FastAPI validation message into readable copy. */
+export function stripPydanticText(msg: string): string {
+  let s = msg.trim()
+  s = s.replace(/^(?:body\.)?([A-Za-z0-9_]+):\s*/i, (_, field: string) => (field === 'note' ? '' : `${field}: `))
+  s = s.replace(/^Value error,\s*/i, '')
+  s = s.replace(/^assertion failed,\s*/i, '')
+  s = s.trim()
+  if (/must not contain control characters/i.test(s)) return COPY.invalid_text
+  if (/must not start with|= \+ - @|spreadsheet formula/i.test(s)) return COPY.formula_prefix
+  return s
+}
+
+export function formatValidationErrors(details: unknown[]): string {
+  return details.map((entry) => {
+    const e = entry as { loc?: unknown[]; msg?: string; message?: string }
+    const loc = (e.loc ?? []).filter((x) => x !== 'body' && x !== 'query' && x !== 'path').join('.')
+    const stripped = stripPydanticText(String(e.msg ?? e.message ?? ''))
+    if (loc && loc !== 'note' && !stripped.toLowerCase().startsWith(`${loc.toLowerCase()}:`)) {
+      return `${loc}: ${stripped}`
+    }
+    return stripped
+  }).filter(Boolean).join('; ')
+}
+
+/** Inline / page copy for a note-field 422 (coded or leftover pydantic text). */
+export function noteFieldError(e: unknown): string | null {
+  const err = e as { code?: string | null; status?: number; detail?: unknown; message?: string }
+  const d = errorDetail(err.detail)
+  if (d?.code === 'invalid_text' || d?.code === 'formula_prefix' || err.code === 'invalid_text' || err.code === 'formula_prefix') {
+    return friendlyMessage(d ?? { code: err.code ?? undefined }, err.status) ?? err.message ?? COPY[err.code ?? d?.code ?? ''] ?? null
+  }
+  const msg = typeof err.message === 'string' ? err.message : ''
+  if (!msg) return null
+  const stripped = stripPydanticText(msg)
+  if (stripped === COPY.invalid_text || stripped === COPY.formula_prefix) return stripped
+  if (/control characters|spreadsheet formula|aren't allowed|can't start with =/i.test(msg)) return stripped
+  return null
 }

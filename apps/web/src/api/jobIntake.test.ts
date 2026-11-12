@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { ApiError } from './client'
-import { friendlyMessage, errorDetail } from './errors'
+import { friendlyMessage, errorDetail, stripPydanticText, formatValidationErrors, noteFieldError } from './errors'
 import {
   DCREQ_PATTERN,
   JOB_INTAKE_API,
@@ -362,5 +362,27 @@ describe('cable-matrix mock import', () => {
     expect(heldItem).toMatchObject({ cable_label: 'CAB-2', source: 'cable_matrix' })
     expect(cableTrail(heldItem!)).toBe('T-1')
     expect(result.items.find((i) => i.item_type === 'cable_matrix_not_uploaded')?.status).toBe('resolved')
+  })
+})
+
+describe('note validation copy', () => {
+  it('uses friendly copy for invalid_text and formula_prefix', () => {
+    expect(friendlyMessage({ code: 'invalid_text', message: 'raw', field: 'note' }, 422)).toBe("This note has characters that aren't allowed.")
+    expect(friendlyMessage({ code: 'formula_prefix', message: 'raw', field: 'note' }, 422)).toBe("This note can't start with =, +, - or @.")
+  })
+
+  it('strips pydantic validation text as a fallback', () => {
+    expect(stripPydanticText('Value error, note must not contain control characters')).toBe("This note has characters that aren't allowed.")
+    expect(stripPydanticText('Value error, note must not contain control characters other than line breaks')).toBe("This note has characters that aren't allowed.")
+    expect(stripPydanticText('note must not start with = + - @ (spreadsheet formula)')).toBe("This note can't start with =, +, - or @.")
+    expect(formatValidationErrors([
+      { type: 'value_error', loc: ['body'], msg: 'Value error, note must not contain control characters' },
+    ])).toBe("This note has characters that aren't allowed.")
+    const coded = new ApiError(422, 'raw', { detail: { code: 'invalid_text', message: 'raw', field: 'note' } })
+    expect(noteFieldError(coded)).toBe("This note has characters that aren't allowed.")
+    const pydantic = new ApiError(422, ': Value error, note must not contain control characters', {
+      detail: [{ type: 'value_error', loc: ['body'], msg: 'Value error, note must not contain control characters' }],
+    })
+    expect(noteFieldError(pydantic)).toBe("This note has characters that aren't allowed.")
   })
 })

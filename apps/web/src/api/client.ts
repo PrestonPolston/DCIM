@@ -1,4 +1,4 @@
-import { errorDetail, friendlyMessage } from './errors'
+import { errorDetail, formatValidationErrors, friendlyMessage } from './errors'
 import type {
   Device, DeviceCreate, DeviceProfile, DeviceListParams, DeviceType, DeviceUpdate, Hall, HallLayout, ListParams, Page, Rack, RackElevationResponse, Row, Site,
 } from './types'
@@ -51,16 +51,16 @@ export async function send(path: string, init: RequestInit = {}): Promise<Respon
       detail = undefined
     }
     const d = (detail as { detail?: unknown } | undefined)?.detail
+    const coded = errorDetail(detail)
+    const friendly = coded ? friendlyMessage(coded, res.status) : null
     const msg =
-      typeof d === 'string'
-        ? d
-        : Array.isArray(d)
-          ? d.map((e: { loc?: unknown[]; msg?: string }) => `${(e.loc ?? []).slice(1).join('.')}: ${e.msg}`).join('; ')
-          : errorDetail(detail) && friendlyMessage(errorDetail(detail)!, res.status)
-            ? friendlyMessage(errorDetail(detail)!, res.status)!
-          : d && typeof d === 'object' && typeof (d as { message?: unknown }).message === 'string'
-            ? (d as { message: string }).message // e.g. {code: 'hostname_conflict', message}
-            : `${res.status} ${res.statusText}`.trim()
+      friendly
+      ?? (typeof d === 'string' ? d : null)
+      ?? (Array.isArray(d) ? formatValidationErrors(d) : null)
+      ?? (d && typeof d === 'object' && typeof (d as { message?: unknown }).message === 'string'
+        ? (d as { message: string }).message
+        : null)
+      ?? `${res.status} ${res.statusText}`.trim()
     throw new ApiError(res.status, res.status === 403 ? `Not allowed: ${msg}` : msg, detail)
   }
   return res

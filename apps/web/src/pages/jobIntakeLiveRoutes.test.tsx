@@ -451,8 +451,20 @@ function installSlice2JobsApi() {
       if (item.status === 'resolved' || item.status === 'dismissed') {
         return json({ detail: { code: 'open_item_closed', message: `This item is already ${item.status}`, status: item.status } }, 409)
       }
+      if (typeof body.note === 'string') body.note = body.note.replace(/\r\n/g, '\n')
       if (action === 'dismiss' && !body.note?.trim()) {
         return json({ detail: { code: 'note_required', message: 'Say why this item is dismissed', field: 'note' } }, 422)
+      }
+      if (typeof body.note === 'string' && body.note.length) {
+        if (/^[=+\-@]/.test(body.note)) {
+          return json({ detail: { code: 'formula_prefix', message: "This note can't start with =, +, - or @.", field: 'note' } }, 422)
+        }
+        if ([...body.note].some((ch) => {
+          const c = ch.charCodeAt(0)
+          return ((c < 32 && ch !== '\n' && ch !== '\t') || c === 127)
+        })) {
+          return json({ detail: { code: 'invalid_text', message: "This note has characters that aren't allowed.", field: 'note' } }, 422)
+        }
       }
       if (action === 'defer') {
         if (item.status !== 'open') return json({ detail: { code: 'open_item_state', message: 'That action is not valid' } }, 409)
@@ -709,5 +721,29 @@ describe('job intake live slice 2 routes (mocked fetch)', () => {
     expect(skipped).toHaveTextContent('srv1:eth0')
     expect(skipped).toHaveTextContent('Port in use')
     expect(result).toHaveTextContent('Missing hostname')
+  })
+
+  it('shows invalid_text and formula_prefix inline on the Note field, and keeps line breaks in a note', async () => {
+    JOB_INTAKE_API.cableImports = true
+    const live = installSlice2JobsApi()
+    const job = live.seedJob('DCREQ0001234', 'Leaf refresh')
+    live.addFieldItem(job, 'nopos')
+    const user = userEvent.setup()
+    renderWithProviders(<App />, '/jobs/DCREQ0001234')
+    const positions = await screen.findByRole('region', { name: 'Missing position' })
+    await user.click(within(positions).getByRole('button', { name: 'Resolve with note' }))
+    await user.type(screen.getByRole('textbox', { name: 'Note' }), '=SUM(A1)')
+    await user.click(screen.getByRole('button', { name: 'Save and resolve' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(/can't start with =, \+, - or @/)
+    expect(screen.getByRole('textbox', { name: 'Note' })).toHaveAttribute('aria-invalid', 'true')
+    await user.clear(screen.getByRole('textbox', { name: 'Note' }))
+    await user.type(screen.getByRole('textbox', { name: 'Note' }), 'First line{Enter}Second line')
+    await user.click(screen.getByRole('button', { name: 'Save and resolve' }))
+    await waitFor(() => {
+      expect(live.jobCalls.some((c) => c.path.endsWith('/resolve') && c.body?.includes('First line\\nSecond line'))).toBe(true)
+    })
+    await user.click(screen.getByRole('tab', { name: /^Resolved$/ }))
+    expect(await screen.findByRole('region', { name: 'Missing position' })).toHaveTextContent(/First line/)
+    expect(screen.getByText(/First line/)).toHaveClass('job-item-note')
   })
 })
