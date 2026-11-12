@@ -27,7 +27,7 @@ export default function JobPage() {
       {job && (
         <div className="card">
           <p role="status">{job.name} · {job.status}{job.overdue ? ' · open more than 30 days' : ''}</p>
-          <p className="hint">{job.device_count} devices · {job.connection_count} connections · {job.unresolved_count} in the fill-later queue.</p>
+          <p className="hint">{job.device_count} devices · {job.connection_count ?? 0} connections · {job.unresolved_count} in the fill-later queue.</p>
           <p className="hint">The fill-later queue and close/reopen actions will land in a later slice.</p>
         </div>
       )}

@@ -372,7 +372,7 @@ export default function JobIntakePage() {
         <div className="card" aria-label="Import result" role="region">
           <h2>Import result · {result.job.dcreq}</h2>
           <p role="status">
-            Job is {result.job.status}. {result.job.device_count} devices · {result.job.connection_count} connections · {result.open_item_count} in the fill-later queue.
+            Job is {result.job.status}. {result.job.device_count} devices · {result.job.connection_count ?? 0} connections · {result.open_item_count} in the fill-later queue.
           </p>
 
           <h3>Warnings</h3>

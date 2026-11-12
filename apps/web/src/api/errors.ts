@@ -24,7 +24,7 @@ const COPY: Record<string, string> = {
   cabinet_profile_in_use: "Can't delete: in use. Retire it instead.",
   cabinet_profile_name_taken: 'A profile with this manufacturer, model and variant already exists.',
   version_conflict: 'Changed by someone else since you opened it. Reload to see the latest.',
-  // Job intake v1 (proposed contract; remap if Backend ships different codes).
+  // Job intake v1 (Backend slice 1 uses job_exists; duplicate_dcreq is treated as the same hard stop).
   dcreq_format: 'Enter a DCREQ like DCREQ0001234 (DCREQ000 + 4 digits).',
   duplicate_dcreq: 'That DCREQ is already a job. Attaching more work to that job isn’t available yet.',
   job_exists: 'That DCREQ is already a job. Attaching more work to that job isn’t available yet.',
@@ -38,7 +38,7 @@ const FLAGGED: Record<string, string> = {
   profile_not_published: "This device's profile isn't published. Choose a published profile, unplace it, or decommission it before other edits.",
 }
 
-export interface ExistingJobRef { id: number; dcreq: string; name: string; status: string }
+export interface ExistingJobRef { id: number; dcreq: string; name: string; status: string; is_job?: boolean; deleted?: boolean }
 export interface ErrorDetail {
   code?: string
   message?: string

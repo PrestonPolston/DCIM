@@ -1,7 +1,8 @@
 // Job intake v1 adapter (docs/design/job-intake.md, docs/db/JOB_INTAKE.md).
-// Contract: /workspace/dcim-phone-audit/job-intake-v1/PROPOSED_JOB_INTAKE_API.md
-// — proposal only; the built API wins when Backend ships it. JOB_INTAKE_API.live
-// defaults to true; tests flip it off and use the in-memory mock of the same shapes.
+// Built API (Backend feat/job-intake-api @ bbff5fe, slice 1): POST/GET /jobs,
+// GET /jobs/{id_or_dcreq}, POST .../close (acknowledge_open_items), POST .../reopen,
+// GET .../open-items. Duplicate code is job_exists. Lists are arrays + X-Total-Count.
+// Import, skip, preview, commit, DELETE abandon, and open-item writes are not shipped yet.
 import { ApiError, API_BASE_URL, getCsrfToken, listPage, request } from './client'
 import { errorDetail, friendlyMessage, type ExistingJobRef } from './errors'
 import { parseApiDate } from '../lib/apiDate'
@@ -52,6 +53,8 @@ export interface Job {
   name: string
   dcreq: string
   primary_dcreq_id: number
+  description?: string | null
+  site_id?: number | null
   status: JobStatus
   opened_at: string
   closed_at: string | null
@@ -61,13 +64,18 @@ export interface Job {
   created_by: string | null
   current: boolean
   overdue: boolean
+  /** opened_at + 30 days (UTC Z). Present on the committed /jobs contract. */
+  overdue_at?: string
   days_open: number
   recently_closed: boolean
   days_since_closed: number | null
   unresolved_count: number
   deferred_count: number
   device_count: number
+  /** Mock and later slices; Backend slice 1 (bbff5fe) does not return this yet. */
   connection_count: number
+  /** Detail only (GET /jobs/{key} and POST /jobs). */
+  unresolved_by_type?: Record<string, number>
 }
 
 export interface JobListParams {
@@ -198,8 +206,8 @@ export interface JobIntakeApi {
   createJob(dcreq: string): Promise<Job>
   getJob(idOrDcreq: number | string): Promise<Job>
   listJobs(params?: JobListParams): Promise<{ items: Job[]; total: number }>
-  closeJob(id: number): Promise<CloseJobResult>
-  reopenJob(id: number): Promise<Job>
+  closeJob(id: number, opts?: { acknowledge_open_items?: boolean; note?: string | null }): Promise<CloseJobResult>
+  reopenJob(id: number, note?: string | null): Promise<Job>
   abandonJob(id: number): Promise<void>
   stageImport(jobId: number, kind: ImportKind, file: File): Promise<JobImport>
   skipFile(jobId: number, kind: ImportKind): Promise<SkipFileResult>
@@ -259,9 +267,19 @@ function liveApi(): JobIntakeApi {
     createJob: (dcreq) => request<Job>('/jobs', { method: 'POST', body: JSON.stringify({ dcreq: normalizeDcreq(dcreq) }) }),
     getJob: (idOrDcreq) => request<Job>(`/jobs/${encodeURIComponent(String(idOrDcreq))}`),
     listJobs: (params = {}) => listPage<Job>('/jobs', params),
-    closeJob: (id) => request<CloseJobResult>(`/jobs/${id}/close`, { method: 'POST' }),
-    reopenJob: async (id) => {
-      const res = await request<Job | { job: Job }>(`/jobs/${id}/reopen`, { method: 'POST' })
+    closeJob: (id, opts = {}) =>
+      request<CloseJobResult>(`/jobs/${id}/close`, {
+        method: 'POST',
+        body: JSON.stringify({
+          acknowledge_open_items: opts.acknowledge_open_items ?? false,
+          note: opts.note ?? null,
+        }),
+      }),
+    reopenJob: async (id, note = null) => {
+      const res = await request<Job | { job: Job }>(`/jobs/${id}/reopen`, {
+        method: 'POST',
+        body: JSON.stringify({ note }),
+      })
       return 'job' in res ? res.job : res
     },
     abandonJob: (id) => request<void>(`/jobs/${id}`, { method: 'DELETE' }),
