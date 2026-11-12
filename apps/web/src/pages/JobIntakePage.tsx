@@ -5,7 +5,9 @@ import {
   duplicateExisting,
   isDuplicateDcreq,
   isValidDcreq,
+  itemTypeLabel,
   jobHref,
+  jobImportsAvailable,
   jobIntakeApi,
   normalizeDcreq,
   type IntakeCommitResult,
@@ -21,7 +23,7 @@ import { errMessage } from '../api/home'
 
 function itemLine(item: { hostname?: string | null; filename?: string | null; item_type: string; target_field?: string | null; status?: string }) {
   const lead = item.hostname ?? item.filename
-  const type = item.item_type.replaceAll('_', ' ')
+  const type = itemTypeLabel(item.item_type)
   const bits = lead
     ? [<span key="h" className="mono">{lead}</span>, ` · ${type}`]
     : [type]
@@ -37,18 +39,20 @@ function errText(e: unknown): string {
 }
 
 function FileSlot({
-  kind, label, current, skipped, disabled, onFile, onSkip, onClear, error,
+  kind, label, current, skipped, disabled, uploadDisabled, onFile, onSkip, onClear, error,
 }: {
   kind: ImportKind
   label: string
   current: JobImport | null
   skipped: boolean
   disabled: boolean
+  uploadDisabled?: boolean
   onFile: (f: File) => void
   onSkip: () => void
   onClear: () => void
   error: string | null
 }) {
+  const fileBlocked = disabled || !!uploadDisabled
   return (
     <div className="job-intake-file">
       <h2>{label}</h2>
@@ -57,7 +61,7 @@ function FileSlot({
           {current.filename}: {current.counts.total} rows · {current.counts.ready} ready · {current.counts.warning} warning · {current.counts.held} held · {current.counts.conflict} conflict
         </p>
       ) : skipped ? (
-        <p className="hint" role="status">Skipped. The {kind === 'epif' ? 'epif_not_uploaded' : 'cable_matrix_not_uploaded'} item created with this job will stay open.</p>
+        <p className="hint" role="status">Skipped. The {itemTypeLabel(kind === 'epif' ? 'epif_not_uploaded' : 'cable_matrix_not_uploaded')} item created with this job will stay open.</p>
       ) : (
         <p className="hint">.csv only, 8 MiB max. Skipping is allowed.</p>
       )}
@@ -66,7 +70,7 @@ function FileSlot({
         <input
           type="file"
           accept=".csv,text/csv"
-          disabled={disabled}
+          disabled={fileBlocked}
           aria-label={`${label} CSV`}
           onChange={(e) => {
             const f = e.target.files?.[0]
@@ -99,6 +103,8 @@ export default function JobIntakePage() {
   const [skipped, setSkipped] = useState<{ epif: boolean; cable_matrix: boolean }>({ epif: false, cable_matrix: false })
   const [preview, setPreview] = useState<IntakePreview | null>(null)
   const [result, setResult] = useState<IntakeCommitResult | null>(null)
+  const [leaveConfirm, setLeaveConfirm] = useState(false)
+  const importsAvailable = jobImportsAvailable()
 
   const canonical = raw.trim() ? normalizeDcreq(raw) : ''
   const valid = isValidDcreq(raw)
@@ -134,7 +140,7 @@ export default function JobIntakePage() {
   }
 
   async function upload(kind: ImportKind, file: File) {
-    if (!job) return
+    if (!job || !importsAvailable) return
     const problem = checkFile(file)
     setFileError((e) => ({ ...e, [kind]: problem }))
     if (problem) return
@@ -164,7 +170,7 @@ export default function JobIntakePage() {
   }
 
   async function goPreview() {
-    if (!job) return
+    if (!job || !importsAvailable) return
     setBusy(true)
     setError(null)
     try {
@@ -178,7 +184,7 @@ export default function JobIntakePage() {
   }
 
   async function commit() {
-    if (!job) return
+    if (!job || !importsAvailable) return
     setBusy(true)
     setError(null)
     try {
@@ -191,9 +197,35 @@ export default function JobIntakePage() {
   }
 
   function cancelIntake() {
-    // DELETE/abandon is not in the committed API. After create, just leave the job.
+    // DELETE/abandon is not in the committed API. After create, the job remains.
     if (!job) { navigate('/'); return }
-    navigate(jobHref(job))
+    setLeaveConfirm(true)
+  }
+
+  function finishWithoutImport() {
+    if (!job) return
+    navigate(`${jobHref(job)}?created=1`)
+  }
+
+  function leaveBanner(created: Job) {
+    if (!leaveConfirm) return null
+    return (
+      <div className="banner" role="status">
+        <p>{created.dcreq} still exists as a job. Close it from the job page if you no longer need it.</p>
+        <div className="actions">
+          <Link className="button primary" to={jobHref(created)}>Open {created.dcreq}</Link>
+          <Link className="button" to="/jobs">Back to jobs</Link>
+          <button type="button" onClick={() => setLeaveConfirm(false)}>Keep working</button>
+        </div>
+      </div>
+    )
+  }
+
+  function importUnavailableNote() {
+    if (importsAvailable) return null
+    return (
+      <p className="banner" role="note">CSV import isn't available yet. You can finish now; the ePIF and cable-matrix items will wait in this job's fill-later queue.</p>
+    )
   }
 
   const epifReady = !!epif || skipped.epif
@@ -274,12 +306,15 @@ export default function JobIntakePage() {
 
       {step === 1 && job && (
         <div className="card">
+          {importUnavailableNote()}
+          {leaveBanner(job)}
           <FileSlot
             kind="epif"
             label="Space & Power (ePIF)"
             current={epif}
             skipped={skipped.epif}
             disabled={!canWrite || busy}
+            uploadDisabled={!importsAvailable}
             onFile={(f) => void upload('epif', f)}
             onSkip={() => skip('epif')}
             onClear={() => clearFile('epif')}
@@ -288,21 +323,35 @@ export default function JobIntakePage() {
           {error && <p className="error" role="alert">{error}</p>}
           <div className="actions">
             <button type="button" disabled={busy} onClick={() => cancelIntake()}>Cancel intake</button>
-            <button type="button" className="primary" disabled={!canWrite || !epifReady || busy} onClick={() => setStep(2)}>
-              Next: Cable matrix
-            </button>
+            {importsAvailable ? (
+              <button type="button" className="primary" disabled={!canWrite || !epifReady || busy} onClick={() => setStep(2)}>
+                Next: Cable matrix
+              </button>
+            ) : (
+              <>
+                <button type="button" disabled={!canWrite || busy} onClick={() => setStep(2)}>
+                  Next: Cable matrix
+                </button>
+                <button type="button" className="primary" disabled={!canWrite || busy} onClick={finishWithoutImport}>
+                  Finish
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}
 
       {step === 2 && job && (
         <div className="card">
+          {importUnavailableNote()}
+          {leaveBanner(job)}
           <FileSlot
             kind="cable_matrix"
             label="Cable matrix"
             current={cable}
             skipped={skipped.cable_matrix}
             disabled={!canWrite || busy}
+            uploadDisabled={!importsAvailable}
             onFile={(f) => void upload('cable_matrix', f)}
             onSkip={() => skip('cable_matrix')}
             onClear={() => clearFile('cable_matrix')}
@@ -312,15 +361,22 @@ export default function JobIntakePage() {
           <div className="actions">
             <button type="button" disabled={busy} onClick={() => cancelIntake()}>Cancel intake</button>
             <button type="button" disabled={busy} onClick={() => setStep(1)}>Back</button>
-            <button type="button" className="primary" disabled={!canWrite || !cableReady || busy} onClick={() => void goPreview()}>
-              Next: Preview
-            </button>
+            {importsAvailable ? (
+              <button type="button" className="primary" disabled={!canWrite || !cableReady || busy} onClick={() => void goPreview()}>
+                Next: Preview
+              </button>
+            ) : (
+              <button type="button" className="primary" disabled={!canWrite || busy} onClick={finishWithoutImport}>
+                Finish
+              </button>
+            )}
           </div>
         </div>
       )}
 
       {step === 3 && job && !result && (
         <div className="card">
+          {leaveBanner(job)}
           <h2>Preview{preview ? ` · ${job.dcreq}` : ''}</h2>
           {preview && (
             <>
