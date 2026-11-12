@@ -146,10 +146,21 @@ def lock_ports(session: Session, ids: list[int]) -> None:
         session.exec(select(DevicePortRow.id).where(DevicePortRow.id.in_(ids)).with_for_update()).all()
 
 
-def port_in_use(session: Session, port_id: int, lane: int = 0, exclude: int | None = None):
-    stmt = select(ConnectionRow.id).where(or_(
-        and_(ConnectionRow.port1_id == port_id, ConnectionRow.port1_lane == lane),
-        and_(ConnectionRow.port2_id == port_id, ConnectionRow.port2_lane == lane)))
+def port_in_use(session: Session, port_id: int, lane: int = 0, exclude: int | None = None,
+                breakout: bool = False):
+    """The non-removed connection holding (port, lane), checked across both columns (DEVICE_DATA_MODEL §7).
+    breakout=True also treats lane 0 vs lane N on the same port as a clash (whole port vs one lane)."""
+    if breakout:
+        lanes = [0] if lane == 0 else [lane, 0]
+        if lane == 0:  # whole port: any lane in use blocks it
+            hit = or_(ConnectionRow.port1_id == port_id, ConnectionRow.port2_id == port_id)
+        else:
+            hit = or_(and_(ConnectionRow.port1_id == port_id, ConnectionRow.port1_lane.in_(lanes)),
+                      and_(ConnectionRow.port2_id == port_id, ConnectionRow.port2_lane.in_(lanes)))
+    else:
+        hit = or_(and_(ConnectionRow.port1_id == port_id, ConnectionRow.port1_lane == lane),
+                  and_(ConnectionRow.port2_id == port_id, ConnectionRow.port2_lane == lane))
+    stmt = select(ConnectionRow.id).where(hit, ConnectionRow.status != "removed")
     if exclude is not None:
         stmt = stmt.where(ConnectionRow.id != exclude)
     return session.exec(stmt).first()

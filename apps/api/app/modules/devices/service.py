@@ -187,12 +187,17 @@ def hard_delete_device(session: Session, device: DeviceRow) -> None:
         for r in rows:
             session.delete(r)
     from sqlalchemy import or_ as _or
-    from app.modules.connections.models import ConnectionRow, DevicePortRow
+    from app.modules.connections.models import ConnectionHopRow, ConnectionRow, DevicePortRow
     port_ids = list(session.exec(select(DevicePortRow.id).where(DevicePortRow.device_id == device.id)).all())
     if port_ids and session.exec(select(ConnectionRow.id).where(_or(
             ConnectionRow.port1_id.in_(port_ids), ConnectionRow.port2_id.in_(port_ids)))).first() is not None:
         raise HTTPException(status_code=409, detail={
             "code": "device_has_connections", "message": "Delete this device's connections first"})
+    if port_ids and session.exec(select(ConnectionHopRow.id).where(
+            ConnectionHopRow.port_id.in_(port_ids))).first() is not None:  # a panel other connections pass through
+        raise HTTPException(status_code=409, detail={
+            "code": "device_has_connections", "message": "Connections pass through this device's ports; delete "
+                                                         "those connections first"})
     for pid in port_ids:
         session.delete(session.get(DevicePortRow, pid))
     record_audit(session, None, "device.hard_delete", "device", device.id,
