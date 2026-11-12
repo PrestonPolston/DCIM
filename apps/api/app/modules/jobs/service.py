@@ -190,8 +190,7 @@ def close_job(session: Session, p: ProjectRow, acknowledge: bool, note: str | No
         warning = {"code": "job_has_open_items", "message": f"This job still has {n} unresolved "
                    f"item{'s' if n != 1 else ''}.", "unresolved_count": n}
         if not acknowledge:
-            raise HTTPException(409, {**warning, "message": warning["message"] + " Close again with "
-                                      "acknowledge_open_items=true to close it anyway."})
+            raise HTTPException(409, {**warning, "message": warning["message"] + " Close it anyway?"})
     cs = new_change_set(session, "api", note=note or f"job {p.id} close")
     now = utcnow()
     p.status, p.closed_at, p.closed_by = "closed", now, actor(session)

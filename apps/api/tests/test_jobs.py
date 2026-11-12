@@ -208,6 +208,9 @@ def test_close_with_open_items_needs_acknowledgement(client, engine):
     assert r.status_code == 409
     d = r.json()["detail"]
     assert d["code"] == "job_has_open_items" and d["unresolved_count"] == 2
+    # the web shows the message raw: plain words, no request field names
+    assert d["message"] == "This job still has 2 unresolved items. Close it anyway?"
+    assert "acknowledge" not in d["message"]
     r = client.post(f"/jobs/{j['id']}/close", json={"acknowledge_open_items": False})
     assert r.status_code == 409
     assert client.get(f"/jobs/{j['id']}").json()["status"] == "open"
@@ -216,6 +219,7 @@ def test_close_with_open_items_needs_acknowledgement(client, engine):
     assert r.status_code == 200
     body = r.json()
     assert body["warning"]["code"] == "job_has_open_items" and body["warning"]["unresolved_count"] == 2
+    assert body["warning"]["message"] == "This job still has 2 unresolved items."
     job = body["job"]
     assert job["status"] == "closed" and job["current"] is False and job["recently_closed"] is True
     assert ISO_Z.match(job["closed_at"]) and job["closed_by"] == "admin1@example.com"
